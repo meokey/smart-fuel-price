@@ -70,6 +70,7 @@ class SmartFuelSensor(SensorEntity):
 
     @property
     def native_value(self):
+        # Return the actual state (price change).
         return self._state
 
     @property

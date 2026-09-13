@@ -1,0 +1,25 @@
+# Python Stack
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+@eaDir/
+
+# Build and Release Artifacts
+*.zip
+*.tgz
+smart_fuel_price.zip
+
+# Excluded Design Assets (User Preference)
+*.svg

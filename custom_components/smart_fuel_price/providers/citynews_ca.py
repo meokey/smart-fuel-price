@@ -13,7 +13,7 @@ from .base import BaseFuelPriceProvider
 
 _LOGGER = logging.getLogger(__name__)
 
-# 动态路由表：不同城市对应不同的 CityNews URL 架构
+# Routing map for different city endpoints
 CITY_URLS = {
     "toronto": "https://toronto.citynews.ca/toronto-gta-gas-prices/",
     "ottawa": "https://ottawa.citynews.ca/gas-prices/",
@@ -25,10 +25,10 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
     def __init__(self, city: str = "toronto"):
         super().__init__("CityNews.ca", city)
         
-        # 验证城市是否受支持，否则回退到多伦多
+        # Validate supported city, fallback to toronto if invalid
         if self.city not in CITY_URLS:
             _LOGGER.warning(
-                "City '%s' is not officially tracked by the CityNews plugin. Falling back to 'toronto'.", 
+                "City '%s' is not supported by CityNews plugin. Falling back to 'toronto'.", 
                 self.city
             )
             self.city = "toronto"
@@ -51,11 +51,10 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
             response = requests.get(self.url, headers=self.headers, timeout=15)
             response.raise_for_status()
             
-            # 清理 HTML 标签
+            # Strip HTML tags for clean regex processing
             text_content = re.sub(r'<[^>]+>', ' ', response.text)
             text_content = re.sub(r'\s+', ' ', text_content)
             
-            # CityNews 标准的 En-Pro 播报模式正则
             change_match = re.search(r'expected to (fall|rise|drop|jump|hold|remain|stay)(?:\s+by)?(?:\s+(\d+(?:\.\d+)?)\s*cent)?', text_content, re.IGNORECASE)
             price_match = re.search(r'average of (\d+(?:\.\d+)?)\s*cent', text_content, re.IGNORECASE)
             date_match = re.search(r'at \d{1,2}:\d{2}[ap]m on ([A-Za-z]+ \d{1,2}, \d{4})', text_content, re.IGNORECASE)
@@ -66,7 +65,7 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
                 amount = float(amount_str) if amount_str else 0.0
                 result["tomorrow_price"] = float(price_match.group(1))
                 
-                # SSoT 核心：严格校验文本中写明的生效日期是否为系统的“明天”
+                # SSoT Validation: Explicitly check if effective date matches tomorrow
                 effective_date_str = date_match.group(1)
                 result["effective_date_str"] = effective_date_str
                 
@@ -77,11 +76,10 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
                     if effective_date == tomorrow:
                         result["is_valid"] = True
                     else:
-                        _LOGGER.warning("CityNews (%s) data is stale. Effective date %s != tomorrow %s", self.city, effective_date, tomorrow)
+                        _LOGGER.warning("Data is stale. Effective date %s != tomorrow %s", effective_date, tomorrow)
                 except ValueError as e:
                     _LOGGER.error("Failed to parse date from CityNews: %s", e)
                     
-                # 只有数据有效，才输出布尔值状态
                 if result["is_valid"]:
                     result["is_dropping"] = action in ['fall', 'drop']
                     result["is_rising"] = action in ['rise', 'jump']
@@ -96,7 +94,7 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
                         result["state"] = 0.0
                         result["trend"] = "flat"
             else:
-                _LOGGER.warning("Failed to match CityNews regex pattern for city: %s", self.city)
+                _LOGGER.warning("Regex pattern did not match for city: %s", self.city)
 
         except Exception as e:
             _LOGGER.error("Error fetching data from CityNews for %s: %s", self.city, e)
