@@ -1,0 +1,45 @@
+name: HACS Release Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  release:
+    types: [published]
+
+jobs:
+  validate:
+    name: HACS Action Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run HACS Validator
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  publish:
+    name: Build & Upload Zip Asset
+    needs: validate
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Archive custom_components
+        run: |
+          cd custom_components/smart_fuel_price
+          zip -r ../../smart_fuel_price.zip .
+
+      - name: Release Zip to GitHub Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: smart_fuel_price.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
