@@ -34,7 +34,7 @@ sensor:
     disabled_attributes:
       - "effective_date_str"
       - "provider_name"
-# Provider 2: Use CityNews for Ottawa
+# Provider 3: Use CityNews for Ottawa
   - platform: smart_fuel_price
     name: "Ottawa Fuel Price"
     provider: "citynews_ca"
