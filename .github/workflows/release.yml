@@ -1,4 +1,4 @@
-name: HACS Release Pipeline
+name: HACS CI/CD Pipeline
 
 on:
   push:
