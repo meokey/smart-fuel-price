@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Smart Fuel Price",
+        "description": "Select your fuel price data provider and target city. If the city is invalid for the provider, setup will fail.",
+        "data": {
+          "provider": "Data Provider",
+          "city": "City Name (e.g. mississauga, toronto)",
+          "api_key": "API Key (Only for GlobalPetrolPrices)"
+        }
+      }
+    },
+    "error": {
+      "unsupported_city": "The specified city is not supported by the selected provider.",
+      "invalid_api_key": "API Key is required for this provider.",
+      "unknown_provider": "Selected provider is unknown."
+    },
+    "abort": {
+      "already_configured": "This provider and city combination is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Attribute Filtering",
+        "description": "Select the attributes you want to DISABLE. Checked attributes will NOT be written to the Home Assistant database.",
+        "data": {
+          "disabled_attributes": "Attributes to Disable"
+        }
+      }
+    }
+  }
+}
