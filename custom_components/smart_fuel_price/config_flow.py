@@ -1,24 +1,22 @@
-"""Config flow for Smart Fuel Price."""
+"""Config flow for Smart Fuel Price supporting dynamic cities and multi-instance."""
 import logging
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.const import CONF_NAME
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
-    DOMAIN, 
-    DEFAULT_NAME, 
-    CONF_PROVIDER, 
-    CONF_CITY, 
-    CONF_API_KEY, 
+    DOMAIN,
+    DEFAULT_NAME,
+    CONF_PROVIDER,
+    CONF_CITY,
+    CONF_API_KEY,
     CONF_DISABLED_ATTRIBUTES,
     AVAILABLE_PROVIDERS,
     OPTIONAL_ATTRIBUTES
 )
 
-# Import providers to fetch real-time supported cities dynamically
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
@@ -26,76 +24,85 @@ from .providers.globalpetrolprices import GlobalPetrolPricesProvider
 
 _LOGGER = logging.getLogger(__name__)
 
+def get_cities_for_provider(provider_key: str) -> list[str]:
+    """Dynamically retrieve supported cities for a given provider."""
+    provider_key = provider_key.lower()
+    if provider_key == "citynews_ca":
+        return CityNewsCaProvider.get_supported_cities()
+    elif provider_key == "fuelwise_app":
+        return FuelwiseAppProvider.get_supported_cities()
+    elif provider_type == "globalpetrolprices":
+        return GlobalPetrolPricesProvider.get_supported_cities()
+    else:
+        return AffordableEnergyCaProvider.get_supported_cities()
+
+
 class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Smart Fuel Price."""
+    """Handle Config Flow allowing multiple sensor instances."""
 
     VERSION = 1
 
+    def __init__(self):
+        """Initialize flow state."""
+        self._selected_provider = "affordableenergy_ca"
+
     async def async_step_import(self, user_input=None):
-        """Handle import from legacy configuration.yaml (Silent Upgrade)."""
-        # Ensure we don't create duplicate entries for the same city+provider
-        unique_id = f"{user_input.get(CONF_PROVIDER)}_{user_input.get(CONF_CITY)}"
+        """Handle legacy configuration.yaml migration."""
+        provider = user_input.get(CONF_PROVIDER, "affordableenergy_ca").lower()
+        city = user_input.get(CONF_CITY, "mississauga").lower()
+        
+        unique_id = f"{provider}_{city}"
         await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured()
 
         return self.async_create_entry(
-            title=user_input.get(CONF_NAME, DEFAULT_NAME), 
+            title=f"{AVAILABLE_PROVIDERS.get(provider, provider)} ({city.capitalize()})",
             data=user_input
         )
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial user setup via UI."""
+        """Handle step 1: Choose Provider and City."""
         errors = {}
 
         if user_input is not None:
-            provider_key = user_input[CONF_PROVIDER]
+            provider_key = user_input[CONF_PROVIDER].lower()
             city = user_input[CONF_CITY].lower()
-            api_key = user_input.get(CONF_API_KEY, "")
+            api_key = user_input.get(CONF_API_KEY, "").strip()
 
-            # Dynamically instantiate the provider to validate the city
-            # This fulfills the requirement: check if city is valid for this provider
-            if provider_key == "affordableenergy_ca":
-                provider_test = AffordableEnergyCaProvider(city)
-            elif provider_key == "fuelwise_app":
-                provider_test = FuelwiseAppProvider(city)
-            elif provider_key == "citynews_ca":
-                provider_test = CityNewsCaProvider(city)
-            elif provider_key == "globalpetrolprices":
-                if not api_key:
-                    errors["base"] = "invalid_api_key"
-                provider_test = GlobalPetrolPricesProvider(api_key, city)
-            else:
-                errors["base"] = "unknown_provider"
+            # 验证 API Key
+            if provider_key == "globalpetrolprices" and not api_key:
+                errors["base"] = "invalid_api_key"
 
-            # Check if city is in the provider's supported list
-            if not errors and city not in provider_test.get_supported_cities():
+            # 验证城市合法性
+            supported_cities = get_cities_for_provider(provider_key)
+            if city not in supported_cities and supported_cities:
                 errors["base"] = "unsupported_city"
-                _LOGGER.error("City '%s' not supported by provider '%s'", city, provider_key)
 
             if not errors:
-                # Validation passed. Set unique ID and create entry.
+                # 唯一 ID 允许配置多个不同的 Provider 或不同的 City
                 unique_id = f"{provider_key}_{city}"
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
-                
+
+                title_name = f"{AVAILABLE_PROVIDERS.get(provider_key, provider_key)} - {city.capitalize()}"
                 return self.async_create_entry(
-                    title=f"{AVAILABLE_PROVIDERS[provider_key]} - {city.capitalize()}", 
-                    data=user_input
+                    title=title_name,
+                    data={
+                        CONF_PROVIDER: provider_key,
+                        CONF_CITY: city,
+                        CONF_API_KEY: api_key,
+                    }
                 )
 
-        # Base schema preparation
-        # Requirement: Use HA location to guess default city if possible
-        default_city = "mississauga" # Default fallback
-        if self.hass.config.latitude and self.hass.config.longitude:
-            # (In a real advanced scenario, you'd calculate distance here. 
-            # For now, we assume user is in GTA based on context)
-            lat = self.hass.config.latitude
-            if 43.0 < lat < 44.0:
-                default_city = "mississauga"
+        # 默认城市推导 (根据 HA 坐标)
+        default_city = "mississauga"
+        supported_cities = get_cities_for_provider(self._selected_provider)
+        if default_city not in supported_cities and supported_cities:
+            default_city = supported_cities[0]
 
         schema = vol.Schema({
             vol.Required(CONF_PROVIDER, default="affordableenergy_ca"): vol.In(AVAILABLE_PROVIDERS),
-            vol.Required(CONF_CITY, default=default_city): str,
+            vol.Required(CONF_CITY, default=default_city): vol.In(supported_cities),
             vol.Optional(CONF_API_KEY, default=""): str,
         })
 
@@ -106,34 +113,31 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        """Get the options flow for this handler."""
+        """Enable Options Flow for attribute management."""
         return SmartFuelPriceOptionsFlowHandler(config_entry)
 
 
 class SmartFuelPriceOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options flow (Configure button in UI)."""
+    """Handle Options Flow for toggling sensor attributes."""
 
     def __init__(self, config_entry):
-        """Initialize options flow."""
         self.config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
-        """Manage the options (Disable specific attributes)."""
+        """Manage attributes to disable."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # Read current disabled attributes from options
-        current_disabled = self.config_entry.options.get(CONF_DISABLED_ATTRIBUTES, [])
+        current_disabled = self.config_entry.options.get(
+            CONF_DISABLED_ATTRIBUTES, 
+            self.config_entry.data.get(CONF_DISABLED_ATTRIBUTES, [])
+        )
 
-        options_schema = vol.Schema({
+        schema = vol.Schema({
             vol.Optional(
-                CONF_DISABLED_ATTRIBUTES, 
+                CONF_DISABLED_ATTRIBUTES,
                 default=current_disabled
             ): cv.multi_select(OPTIONAL_ATTRIBUTES)
         })
 
-        return self.async_show_form(
-            step_id="init", 
-            data_schema=options_schema,
-            description_placeholders={"info": "Select attributes you want to HIDE."}
-        )
+        return self.async_show_form(step_id="init", data_schema=schema)
