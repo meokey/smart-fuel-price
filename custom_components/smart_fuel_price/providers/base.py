@@ -18,7 +18,7 @@ class BaseFuelPriceProvider(ABC):
         pass
 
     @abstractmethod
-    def fetch_data(()) -> Dict[str, Any]:
+    def fetch_data(self) -> Dict[str, Any]:
         """
         Fetch and parse fuel price data.
         Must return a dict adhering to the standard schema:
