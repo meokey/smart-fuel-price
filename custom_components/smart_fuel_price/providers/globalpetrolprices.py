@@ -15,7 +15,8 @@ class GlobalPetrolPricesProvider(BaseFuelPriceProvider):
         self.api_key = api_key
         self.endpoint = "https://www.globalpetrolprices.com/api/v1/fuel_prices"
 
-    def get_supported_cities(self) -> List[str]:
+    @classmethod
+    def get_supported_cities(cls) -> List[str]:
         return ["canada", "usa", "uk", "germany", "australia"]
 
     def fetch_data(self) -> Dict[str, Any]:

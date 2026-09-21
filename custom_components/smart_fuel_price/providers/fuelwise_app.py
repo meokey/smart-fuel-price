@@ -17,7 +17,8 @@ class FuelwiseAppProvider(BaseFuelPriceProvider):
         self.url = f"https://fuelwise.app/city/{self.city}" if self.city != "toronto" else "https://fuelwise.app/"
         self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    def get_supported_cities(self) -> List[str]:
+    @classmethod
+    def get_supported_cities(cls) -> List[str]:
         return SUPPORTED_CITIES
 
     def fetch_data(self) -> Dict[str, Any]:
