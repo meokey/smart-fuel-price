@@ -31,7 +31,7 @@ def get_cities_for_provider(provider_key: str) -> list[str]:
         return CityNewsCaProvider.get_supported_cities()
     elif provider_key == "fuelwise_app":
         return FuelwiseAppProvider.get_supported_cities()
-    elif provider_type == "globalpetrolprices":
+    elif provider_key == "globalpetrolprices":
         return GlobalPetrolPricesProvider.get_supported_cities()
     else:
         return AffordableEnergyCaProvider.get_supported_cities()
