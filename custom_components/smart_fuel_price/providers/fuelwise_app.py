@@ -1,65 +1,38 @@
-"""
-Provider plugin for Fuelwise.app (Aggregates GasWizard & CityNews data).
-"""
+"""Fuelwise App Provider."""
 import logging
-import re
 import requests
-from typing import List, Dict, Any
+# from bs4 import BeautifulSoup  # 如果使用了bs4请取消注释
 from .base import BaseFuelPriceProvider
 
 _LOGGER = logging.getLogger(__name__)
 
-SUPPORTED_CITIES = ["toronto", "mississauga", "ottawa", "hamilton", "kitchener", "london"]
-
 class FuelwiseAppProvider(BaseFuelPriceProvider):
-    def __init__(self, city: str = "toronto"):
-        super().__init__("Fuelwise.app", city)
-        self.url = f"https://fuelwise.app/city/{self.city}" if self.city != "toronto" else "https://fuelwise.app/"
-        self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    """Provider for Fuelwise."""
+
+    @property
+    def name(self) -> str:
+        return "Fuelwise"
 
     @classmethod
-    def get_supported_cities(cls) -> List[str]:
-        return SUPPORTED_CITIES
+    def get_supported_cities(cls) -> list[str]:
+        return ["toronto", "mississauga", "ottawa", "hamilton", "kitchener"]
 
-    def fetch_data(self) -> Dict[str, Any]:
-        result = {
-            "state": None, "tomorrow_price": None, "trend": "unknown",
-            "effective_date_str": "unknown", "is_valid": False,
-            "is_dropping": False, "is_rising": False,
-            "provider_name": self.name, "city": self.city
-        }
+    def _parse_data(self) -> dict:
+        api_url = f"https://api.fuelwise.ca/v1/prices/{self.city}"
+        
+        response = requests.get(api_url, timeout=self._timeout)
+        if response.status_code != 200:
+            _LOGGER.warning("[%s] Received non-200 status: %s", self.name, response.status_code)
+            return {}
 
-        try:
-            response = requests.get(self.url, headers=self.headers, timeout=15)
-            response.raise_for_status()
-            text = re.sub(r'<[^>]+>', ' ', response.text)
-            text = re.sub(r'\s+', ' ', text)
-
-            # Match Fuelwise specific summary cards
-            change_match = re.search(r'(fall|rise|drop|jump|hold|stay)\s*(?:by)?\s*(\d+(?:\.\d+)?)\s*cents?', text, re.IGNORECASE)
-            price_match = re.search(r'(\d+(?:\.\d+)?)\s*cents?/litre', text, re.IGNORECASE)
-
-            if change_match and price_match:
-                action = change_match.group(1).lower()
-                amount = float(change_match.group(2))
-                result["tomorrow_price"] = float(price_match.group(1))
-                result["is_valid"] = True
-
-                if action in ['fall', 'drop']:
-                    result["state"] = -amount
-                    result["trend"] = "down"
-                    result["is_dropping"] = True
-                elif action in ['rise', 'jump']:
-                    result["state"] = amount
-                    result["trend"] = "up"
-                    result["is_rising"] = True
-                else:
-                    result["state"] = 0.0
-                    result["trend"] = "flat"
-            else:
-                _LOGGER.warning("Fuelwise.app pattern match failed for city: %s", self.city)
-
-        except Exception as e:
-            _LOGGER.error("Error fetching Fuelwise.app data for %s: %s", self.city, e)
-
-        return result
+        # 示例：如果是 JSON 返回
+        data = response.json()
+        parsed = {}
+        
+        # 边界提取：利用 dict.get 提供安全的 None 返回
+        current_price = data.get("current_price")
+        if current_price:
+            parsed["state"] = float(current_price)
+            parsed["is_valid"] = True
+            
+        return parsed

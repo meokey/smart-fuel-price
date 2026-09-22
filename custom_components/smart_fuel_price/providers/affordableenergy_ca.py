@@ -1,75 +1,54 @@
-"""
-Provider plugin for AffordableEnergy.ca (Gas Wizard by Dan McTeague).
-Supports dynamic city validation across Canada.
-"""
+"""Affordable Energy Canada (Gas Wizard) Provider."""
 import logging
-import re
 import requests
-from typing import List, Dict, Any
 from .base import BaseFuelPriceProvider
 
 _LOGGER = logging.getLogger(__name__)
 
-SUPPORTED_CITIES = [
-    "toronto", "mississauga", "brampton", "vancouver", "calgary", 
-    "edmonton", "ottawa", "montreal", "winnipeg", "halifax", "victoria", "hamilton"
-]
-
 class AffordableEnergyCaProvider(BaseFuelPriceProvider):
-    def __init__(self, city: str = "mississauga"):
-        super().__init__("AffordableEnergy.ca", city)
-        if self.city not in SUPPORTED_CITIES:
-            _LOGGER.warning(
-                "City '%s' not in preset list for AffordableEnergy. Attempting fetch anyway.", self.city
-            )
-        self.url = f"https://www.affordableenergy.ca/gas-prices/{self.city}/"
-        self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    """Provider for Gas Wizard."""
+
+    @property
+    def name(self) -> str:
+        return "Affordable Energy (Gas Wizard)"
 
     @classmethod
-    def get_supported_cities(cls) -> List[str]:
-        return SUPPORTED_CITIES
+    def get_supported_cities(cls) -> list[str]:
+        return ["mississauga", "toronto", "vancouver", "calgary", "ottawa", "montreal"]
 
-    def fetch_data(self) -> Dict[str, Any]:
-        result = {
-            "state": None, "tomorrow_price": None, "trend": "unknown",
-            "effective_date_str": "tomorrow", "is_valid": False,
-            "is_dropping": False, "is_rising": False,
-            "provider_name": self.name, "city": self.city
-        }
+    def _parse_data(self) -> dict:
+        """Implementation of specific data parsing for Gas Wizard."""
+        # Note: replace with your actual API endpoint and params
+        api_url = "https://gaswizard.ca/api/your_endpoint" 
+        
+        response = requests.get(api_url, timeout=self._timeout)
+        if response.status_code != 200:
+            _LOGGER.warning("[%s] HTTP Error %s", self.name, response.status_code)
+            return {}
 
-        try:
-            response = requests.get(self.url, headers=self.headers, timeout=15)
-            response.raise_for_status()
-            text = re.sub(r'<[^>]+>', ' ', response.text)
-            text = re.sub(r'\s+', ' ', text)
+        data = response.json()
+        results_list = data.get("result", [])
+        
+        # 安全防御：校验数据列表的有效性
+        if not results_list or not isinstance(results_list, list):
+            _LOGGER.warning("[%s] API returned empty or invalid results array.", self.name)
+            return {}
+            
+        first_item = results_list[0]
+        if not isinstance(first_item, dict):
+            _LOGGER.warning("[%s] API result structure changed.", self.name)
+            return {}
 
-            # Match format: "forecast at 186.9¢/L, up 8.0¢" or "down 4.0¢"
-            match = re.search(
-                r'forecast at (\d+(?:\.\d+)?)¢/L,\s*(up|down|unchanged)(?:\s+(\d+(?:\.\d+)?)¢)?', 
-                text, re.IGNORECASE
-            )
-
-            if match:
-                result["tomorrow_price"] = float(match.group(1))
-                action = match.group(2).lower()
-                amount = float(match.group(3)) if match.group(3) else 0.0
-                result["is_valid"] = True
-
-                if action == 'down':
-                    result["state"] = -amount
-                    result["trend"] = "down"
-                    result["is_dropping"] = True
-                elif action == 'up':
-                    result["state"] = amount
-                    result["trend"] = "up"
-                    result["is_rising"] = True
-                else:
-                    result["state"] = 0.0
-                    result["trend"] = "flat"
-            else:
-                _LOGGER.warning("AffordableEnergy pattern match failed for city: %s", self.city)
-
-        except Exception as e:
-            _LOGGER.error("Error fetching AffordableEnergy data for %s: %s", self.city, e)
-
-        return result
+        parsed = {}
+        raw_price = first_item.get("price")
+        if raw_price is not None:
+            parsed["state"] = float(raw_price)
+            parsed["is_valid"] = True
+            
+        trend_val = first_item.get("trend", "").lower()
+        if trend_val in ["up", "down", "flat"]:
+            parsed["trend"] = trend_val
+            parsed["is_dropping"] = (trend_val == "down")
+            parsed["is_rising"] = (trend_val == "up")
+            
+        return parsed

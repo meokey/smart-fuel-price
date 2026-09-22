@@ -1,45 +1,49 @@
-"""
-Provider plugin for GlobalPetrolPrices.com API.
-Placeholder for API integration pending authorization/key acquisition.
-"""
+"""GlobalPetrolPrices API Provider."""
 import logging
 import requests
-from typing import List, Dict, Any
 from .base import BaseFuelPriceProvider
 
 _LOGGER = logging.getLogger(__name__)
 
 class GlobalPetrolPricesProvider(BaseFuelPriceProvider):
-    def __init__(self, api_key: str = "", country: str = "canada"):
-        super().__init__("GlobalPetrolPrices API", country)
-        self.api_key = api_key
-        self.endpoint = "https://www.globalpetrolprices.com/api/v1/fuel_prices"
+    """Provider for GlobalPetrolPrices."""
+
+    def __init__(self, api_key: str, city: str):
+        # 初始化父类
+        super().__init__(city)
+        self._api_key = api_key
+
+    @property
+    def name(self) -> str:
+        return "GlobalPetrolPrices API"
 
     @classmethod
-    def get_supported_cities(cls) -> List[str]:
-        return ["canada", "usa", "uk", "germany", "australia"]
+    def get_supported_cities(cls) -> list[str]:
+        # 全局 API 无需预置硬编码列表，返回空列表代表全通过
+        return []
 
-    def fetch_data(self) -> Dict[str, Any]:
-        result = {
-            "state": None, "tomorrow_price": None, "trend": "unknown",
-            "effective_date_str": "unknown", "is_valid": False,
-            "is_dropping": False, "is_rising": False,
-            "provider_name": self.name, "city": self.city
-        }
+    def _parse_data(self) -> dict:
+        if not self._api_key:
+            _LOGGER.error("[%s] No API key provided.", self.name)
+            return {}
 
-        if not self.api_key:
-            _LOGGER.info("GlobalPetrolPrices API key not configured yet.")
-            return result
+        api_url = f"https://globalpetrolprices.com/api/gasoline/{self.city}/"
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        
+        response = requests.get(api_url, headers=headers, timeout=self._timeout)
+        
+        if response.status_code in [401, 403]:
+            _LOGGER.error("[%s] Authentication failed. Check your API Key.", self.name)
+            return {}
+        elif response.status_code != 200:
+            return {}
 
-        try:
-            # Code structure ready for API response
-            params = {"apiKey": self.api_key, "country": self.city, "fuel_type": "gasoline"}
-            response = requests.get(self.endpoint, params=params, timeout=15)
-            if response.status_code == 200:
-                data = response.json()
-                # Process API payload here
-                result["is_valid"] = True
-        except Exception as e:
-            _LOGGER.error("GlobalPetrolPrices API error: %s", e)
-
-        return result
+        data = response.json()
+        parsed = {}
+        
+        price = data.get("price")
+        if price is not None:
+            parsed["state"] = float(price)
+            parsed["is_valid"] = True
+            
+        return parsed

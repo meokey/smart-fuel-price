@@ -114,22 +114,23 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Enable Options Flow for attribute management."""
-        return SmartFuelPriceOptionsFlowHandler(config_entry)
+        # HA 2024.x+ 会自动处理 config_entry，无需在此处传参
+        return SmartFuelPriceOptionsFlowHandler()
 
 
 class SmartFuelPriceOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle Options Flow for toggling sensor attributes."""
 
-    def __init__(self, config_entry):
-        self.config_entry = config_entry
+    # 注意：千万不要在这里写 __init__(self, config_entry)，HA 底层会自动注入 self.config_entry
 
     async def async_step_init(self, user_input=None):
         """Manage attributes to disable."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
+        # 直接调用 HA 原生注入的 self.config_entry
         current_disabled = self.config_entry.options.get(
-            CONF_DISABLED_ATTRIBUTES, 
+            CONF_DISABLED_ATTRIBUTES,
             self.config_entry.data.get(CONF_DISABLED_ATTRIBUTES, [])
         )
 

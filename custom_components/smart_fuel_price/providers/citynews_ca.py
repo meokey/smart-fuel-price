@@ -15,33 +15,30 @@ CITY_MAP = {
 class CityNewsCaProvider(BaseFuelPriceProvider):
     """Provider for CityNews Canada."""
 
-    def __init__(self, city: str):
-        super().__init__(city)
-        self._city = city.strip().lower()
-
     @property
     def name(self) -> str:
         return "CityNews Canada"
 
     @classmethod
     def get_supported_cities(cls) -> list[str]:
-        """Return a list of supported cities dynamically."""
         return list(CITY_MAP.keys())
 
-    def fetch_data(self) -> dict:
-        """Fetch fuel price data from CityNews API."""
-        target_city = CITY_MAP.get(self._city)
+    def _parse_data(self) -> dict:
+        target_city = CITY_MAP.get(self.city)
         if not target_city:
             _LOGGER.warning(
-                "City '%s' is not natively supported by CityNews. Falling back to 'toronto'.",
-                self._city
+                "[%s] City '%s' is not supported natively. Falling back to 'toronto'.", 
+                self.name, self.city
             )
             target_city = "toronto"
 
-        # 实际 API 请求逻辑
-        return {
-            "state": 1.5,
-            "provider_name": self.name,
-            "city": target_city,
+        # 这里替换为你实际抓取 CityNews 的 URL 与逻辑
+        # api_url = f"https://toronto.citynews.ca/toronto-gas-prices/?city={target_city}"
+        
+        parsed = {
+            "city": target_city,  # 更新结果里的真实映射城市
+            "state": 1.5,         # 模拟数据，替换为实际抓取值
             "is_valid": True
         }
+        
+        return parsed
