@@ -20,6 +20,8 @@ Thumbs.db
 *.zip
 *.tgz
 smart_fuel_price.zip
+*.sw?
+.pytest_cache/
 
 # Excluded Design Assets (User Preference)
 *.svg

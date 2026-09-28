@@ -2,51 +2,47 @@
 
 gaswizard.ca is Dan McTeague / Canadians for Affordable Energy's own site --
 the PRIMARY source for the same next-day forecast data that En-Pro licenses
-out to CityNews (see vendor_widgets.py / citynews_ca.py). Confirmed as a
-plain server-rendered WordPress site (Astra theme) via direct GET -- no JS
-rendering involved, unlike Calgary's GasBuddy embed.
+out to CityNews (see vendor_widgets.py / citynews_ca.py). It is a plain
+server-rendered WordPress site (Astra theme); no JS rendering is involved.
 
-Each city page (https://www.gaswizard.ca/<city>) shows a rolling,
-newest-first list of daily "Regular" price entries:
+Each city page (https://www.gaswizard.ca/<city>, which redirects to
+https://gaswizard.ca/gas-prices/<city>/) contains a rolling, newest-first
+list of daily "Regular" price entries:
 
     <ul class="single-city-prices ">
       <li>
-        <span class="daytext">Saturday</span> -
-        <span class="datetext">Sep 26, 2026</span>
-        ...
-        <div class="fueltitle">Regular</div>
-        <div class="fuelprice">
-          <span class="fuel-price-value">188.9</span>
-          <div class="price-direction pd-up">
-            <span class="price-text">+1&#162;</span>
-          </div>
-        </div>
+        <span class="daytext">Monday</span> -
+        <span class="datetext">Sep 28, 2026</span>
+        ... <div class="fueltitle">Regular</div>
+        <div class="fuelprice"><span class="fuel-price-value">181.9</span> ...
       </li>
-      <li> ... previous day (e.g. Friday, 187.9) ... </li>
-      ...
+      <li> ... previous day ... </li>
+      <li> ... "Current Average Price" (no daytext -- skipped) ... </li>
     </ul>
 
-Consecutive entries' prices are directly consistent with the shown delta
-(entry[0].price - delta == entry[1].price), so both values can be read
-straight off the page -- no arithmetic needed, unlike CityNews's sentence.
-
-ASSUMPTION (not explicitly labelled by the site): list position is newest
-first, so entry[0] = latest/upcoming prediction (tomorrow_price), entry[1]
-= prior confirmed price (state). Revisit if a future capture contradicts
-this ordering.
+Design notes:
+  * Each <li> is parsed on its own. The first version tied each entry to a
+    following <div class="price-direction pd-...">; on a "no change" day
+    that div is absent (the page shows "---"), so the regex ran on into
+    the next entry and swallowed it. Direction markup isn't needed at all:
+    trend comes from comparing the two prices.
+  * Order verified 2026-09-27 (8:53 pm): entry[0] = Monday Sep 28
+    (tomorrow's prediction); entry[1] = Sunday Sep 27, whose price equals
+    the page's own "Current Average Price". So entry[1] -> current_price; 
+    state is their difference.
 """
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any
 
-from .base import BaseFuelPriceProvider, cents_to_dollars
+from .base import BaseFuelPriceProvider, trend_fields
 
 _LOGGER = logging.getLogger(__name__)
 
 # Only "toronto" has been live-verified; the rest follow the same URL
-# pattern by inference from the site's uniform per-city page structure.
-CITY_MAP: Dict[str, str] = {
+# pattern by inference (all six appear in the site's own city list).
+CITY_MAP: dict[str, str] = {
     "toronto": "toronto",
     "mississauga": "mississauga",
     "vancouver": "vancouver",
@@ -55,15 +51,35 @@ CITY_MAP: Dict[str, str] = {
     "montreal": "montreal",
 }
 
+_PRICE_LIST_RE = re.compile(
+    r'<ul class="single-city-prices[^"]*">(?P<body>.*?)</ul>', re.DOTALL
+)
+_LI_RE = re.compile(r"<li\b[^>]*>(?P<body>.*?)</li>", re.DOTALL)
 _ENTRY_RE = re.compile(
     r'<span class="daytext">(?P<day>[^<]+)</span>\s*-\s*'
     r'<span class="datetext">(?P<date>[^<]+)</span>.*?'
     r'<div class="fueltitle">Regular</div>\s*'
     r'<div class="fuelprice">\s*'
-    r'<span class="fuel-price-value">(?P<price>[\d.]+)</span>.*?'
-    r'<div class="price-direction (?P<direction>pd-up|pd-down|pd-flat)">',
+    r'<span class="fuel-price-value">(?P<price>[\d.]+)</span>',
     re.DOTALL,
 )
+
+
+def _extract_entries(page_html: str) -> list[re.Match[str]]:
+    """Return one match per <li> holding a dated 'Regular' price, in page order.
+
+    List items without a day/date/Regular price (e.g. "Current Average
+    Price") simply don't match and are skipped.
+    """
+    price_list = _PRICE_LIST_RE.search(page_html)
+    if not price_list:
+        return []
+    entries = []
+    for li in _LI_RE.finditer(price_list.group("body")):
+        entry = _ENTRY_RE.search(li.group("body"))
+        if entry:
+            entries.append(entry)
+    return entries
 
 
 class AffordableEnergyCaProvider(BaseFuelPriceProvider):
@@ -76,45 +92,44 @@ class AffordableEnergyCaProvider(BaseFuelPriceProvider):
         return "Affordable Energy (Gas Wizard)"
 
     @classmethod
-    def get_supported_cities(cls) -> List[str]:
+    def get_supported_cities(cls) -> list[str]:
         return list(CITY_MAP.keys())
 
-    def _parse_data(self) -> Dict[str, Any]:
+    def _parse_data(self) -> dict[str, Any]:
         slug = CITY_MAP.get(self.city)
         if not slug:
             _LOGGER.warning(
                 "[%s] City '%s' is not in the known map; falling back to 'toronto'.",
-                self.name, self.city,
+                self.name,
+                self.city,
             )
             slug = CITY_MAP["toronto"]
 
         url = f"{self.BASE_URL}/{slug}"
         page_html = self._get(url).text
 
-        matches = list(_ENTRY_RE.finditer(page_html))
-        if len(matches) < 2:
+        entries = _extract_entries(page_html)
+        if len(entries) < 2:
             _LOGGER.warning(
-                "[%s] Found %d 'Regular' price entries for '%s' (need at "
+                "[%s] Found %d dated 'Regular' price entries for '%s' (need at "
                 "least 2) -- page layout may have changed.",
-                self.name, len(matches), slug,
+                self.name,
+                len(entries),
+                slug,
             )
             return {"city": slug, "is_valid": False}
 
-        latest, prior = matches[0], matches[1]
+        latest, prior = entries[0], entries[1]
         tomorrow_cents = float(latest.group("price"))
         current_cents = float(prior.group("price"))
-
-        is_rising = tomorrow_cents > current_cents
-        is_dropping = tomorrow_cents < current_cents
-        trend = "rising" if is_rising else "falling" if is_dropping else "unknown"
+        change_cents = round(tomorrow_cents - current_cents, 1)
 
         return {
-            "state": cents_to_dollars(current_cents),
-            "tomorrow_price": cents_to_dollars(tomorrow_cents),
-            "trend": trend,
+            "state": change_cents,
+            "tomorrow_price": tomorrow_cents,
+            "current_price": current_cents,
             "effective_date_str": f"{latest.group('day').strip()} {latest.group('date').strip()}",
             "is_valid": True,
-            "is_rising": is_rising,
-            "is_dropping": is_dropping,
             "city": slug,
+            **trend_fields(change_cents),
         }

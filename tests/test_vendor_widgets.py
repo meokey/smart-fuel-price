@@ -1,19 +1,17 @@
-"""Tests for vendor_widgets.py parsers.
+"""Tests for vendor_widgets.py parsers and base.py helpers.
 
 Pure-function tests -- no network, no Home Assistant test harness needed.
 Fixtures are minimal HTML snippets confirmed against live pages during
-development (see providers/citynews_ca.py history for the sources).
+development.
 """
 
 import pytest
 
-from custom_components.smart_fuel_price.providers import vendor_widgets
-from custom_components.smart_fuel_price.providers.base import (
-    cents_to_dollars,
-    first_number,
-)
+from sfp_providers import vendor_widgets
+from sfp_providers.base import cents_to_dollars, first_number, trend_fields
 
-# Confirmed live on toronto.citynews.ca/gas-prices/ (2026-09-27)
+# Confirmed live on toronto.citynews.ca/gas-prices/ (2026-09-27).
+# Deliberately line-wrapped mid-sentence to prove whitespace tolerance.
 FORECAST_FALLING_HTML = """
 <div class="gas-prices-section">
   <div class="data-box-change">
@@ -32,6 +30,18 @@ FORECAST_RISING_HTML = """
   En-Pro tells CityNews that prices are expected to rise 4 cents at 12:01am
   on October 1, 2026 to an average of 190.9 cents/litre at local stations.
 </div>
+"""
+
+# Confirmed live on kitchener.citynews.ca/gas-prices/ (2026-09-27).
+FORECAST_UNCHANGED_HTML = """
+<div class="data-box-change">
+  <div class="up-arrow" style=""></div>
+  <div class="down-arrow" style=""></div>
+  <div class="float-start">No Change</div>
+</div>
+<a href="http://www.en-pro.com/">En-Pro</a> tells CityNews that prices are
+expected to remain unchanged at 12:01am on September 28, 2026 holding at an
+average of 181.9 cent(s)/litre at local stations.
 """
 
 FORECAST_NO_MATCH_HTML = "<html><body>Nothing relevant here.</body></html>"
@@ -53,28 +63,41 @@ GASBUDDY_RISING_HTML = GASBUDDY_FALLING_HTML.replace(
 
 
 class TestParseEnProForecast:
-    def test_falling_price_computes_correct_current_and_tomorrow(self):
+    def test_falling_price(self):
         result = vendor_widgets.parse_en_pro_forecast(FORECAST_FALLING_HTML)
 
         assert result is not None
         assert result["is_valid"] is True
+        assert result["state"] == pytest.approx(-7.0)
+        assert result["tomorrow_price"] == pytest.approx(181.9)
+        assert result["current_price"] == pytest.approx(188.9)
         assert result["trend"] == "falling"
         assert result["is_dropping"] is True
         assert result["is_rising"] is False
-        assert result["tomorrow_price"] == pytest.approx(1.819)
-        # today = tomorrow + change = 181.9 + 7 = 188.9 cents = $1.889
-        assert result["state"] == pytest.approx(1.889)
         assert "September 27, 2026" in result["effective_date_str"]
 
-    def test_rising_price_computes_correct_current_and_tomorrow(self):
+    def test_rising_price(self):
         result = vendor_widgets.parse_en_pro_forecast(FORECAST_RISING_HTML)
 
         assert result is not None
+        assert result["state"] == pytest.approx(4.0)
+        assert result["tomorrow_price"] == pytest.approx(190.9)
+        assert result["current_price"] == pytest.approx(186.9)
         assert result["trend"] == "rising"
         assert result["is_rising"] is True
-        assert result["tomorrow_price"] == pytest.approx(1.909)
-        # today = tomorrow - change = 190.9 - 4 = 186.9 cents = $1.869
-        assert result["state"] == pytest.approx(1.869)
+
+    def test_unchanged_price(self):
+        result = vendor_widgets.parse_en_pro_forecast(FORECAST_UNCHANGED_HTML)
+
+        assert result is not None
+        assert result["is_valid"] is True
+        assert result["state"] == pytest.approx(0.0)
+        assert result["tomorrow_price"] == pytest.approx(181.9)
+        assert result["current_price"] == pytest.approx(181.9)
+        assert result["trend"] == "stable"
+        assert result["is_rising"] is False
+        assert result["is_dropping"] is False
+        assert "September 28, 2026" in result["effective_date_str"]
 
     def test_no_match_returns_none(self):
         assert vendor_widgets.parse_en_pro_forecast(FORECAST_NO_MATCH_HTML) is None
@@ -88,7 +111,8 @@ class TestParseGasbuddyReport:
         assert result["is_valid"] is True
         assert result["trend"] == "falling"
         assert result["is_dropping"] is True
-        assert result["state"] == pytest.approx(1.677)
+        assert result["current_price"] == pytest.approx(167.7)
+        assert result["state"] is None  # change size not in the summary widget
         assert result["tomorrow_price"] is None  # GasBuddy has no forecast
 
     def test_rising_trend(self):
@@ -112,3 +136,19 @@ class TestBaseHelpers:
         assert first_number("181.9 cent(s)/litre") == 181.9
         assert first_number(None) is None
         assert first_number("no digits here") is None
+
+    @pytest.mark.parametrize(
+        "change, trend, rising, dropping",
+        [
+            (4.0, "rising", True, False),
+            (-7.0, "falling", False, True),
+            (0.0, "stable", False, False),
+            (None, "unknown", False, False),
+        ],
+    )
+    def test_trend_fields(self, change, trend, rising, dropping):
+        assert trend_fields(change) == {
+            "trend": trend,
+            "is_rising": rising,
+            "is_dropping": dropping,
+        }

@@ -40,6 +40,15 @@ def cents_to_dollars(cents: float | None) -> float | None:
         return None
     return round(cents / 100, 3)
 
+def trend_fields(change_cents: float | None) -> dict[str, Any]:
+    """Map a signed price change (¢/L) to trend / is_rising / is_dropping."""
+    if change_cents is None:
+        return {"trend": "unknown", "is_rising": False, "is_dropping": False}
+    if change_cents > 0:
+        return {"trend": "rising", "is_rising": True, "is_dropping": False}
+    if change_cents < 0:
+        return {"trend": "falling", "is_rising": False, "is_dropping": True}
+    return {"trend": "stable", "is_rising": False, "is_dropping": False}
 
 class BaseFuelPriceProvider(ABC):
     """Abstract Base Class for Fuel Price Providers with built-in Defensiveness."""
@@ -115,8 +124,9 @@ class BaseFuelPriceProvider(ABC):
         """
         # Fail-safe default values
         result: dict[str, Any] = {
-            "state": None,
-            "tomorrow_price": None,
+            "state": None,  # signed price change in ¢/L (tomorrow - current)
+            "tomorrow_price": None,  # forecast average, ¢/L
+            "current_price": None,  # today's average, ¢/L
             "trend": "unknown",
             "effective_date_str": "N/A",
             "is_valid": False,
