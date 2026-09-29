@@ -75,6 +75,32 @@ To customize which attributes are sent to your database:
 
 ---
 
+## GasBuddy (per-station)
+
+Unlike the other providers, GasBuddy tracks specific gas stations you
+choose, not a city average — there's no forecast, just live reported
+prices.
+
+**Finding a station ID:**
+1. Open https://www.gasbuddy.com/gaspricemap
+2. Click a station's price bubble, then click through to its page
+3. The station ID is the number at the end of the URL:
+   `https://www.gasbuddy.com/station/205748` → ID is `205748`
+
+When configuring, select **GasBuddy (Station)** as the provider and
+enter one or more station IDs, comma-separated (e.g. `205748, 123456`).
+One sensor is created per station.
+
+*Station price data is retrieved via an endpoint documented by the
+[Red5d/ha-gasbuddy](https://github.com/Red5d/ha-gasbuddy) project —
+thanks to Red5d and contributors for that groundwork.*
+
+## Upgrading to v2.3.6+
+
+`state` changed meaning: it's now the **signed price change** in ¢/L
+(e.g. `-7.0`, `0.0`, `+4.0`) rather than the current price in $/L.
+Check any automations that read this sensor's state directly.
+
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.

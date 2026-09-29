@@ -7,13 +7,14 @@ CONF_PROVIDER = "provider"
 CONF_CITY = "city"
 CONF_API_KEY = "api_key"
 CONF_DISABLED_ATTRIBUTES = "disabled_attributes"
+CONF_STATION_IDS = "station_ids"
 
 # List of available providers (Factory mapping will happen in sensor.py)
 AVAILABLE_PROVIDERS = {
     "affordableenergy_ca": "Canada (Gas Wizard)",
     "fuelwise_app": "Ontario / GTA (Fuelwise)",
     "citynews_ca": "Canada (CityNews)",
-    "globalpetrolprices": "Global API (Key Required)"
+    "gasbuddy_ca": "GasBuddy (Station)"
 }
 
 # Attributes that users can choose to disable in Options Flow

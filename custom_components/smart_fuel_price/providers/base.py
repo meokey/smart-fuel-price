@@ -96,6 +96,16 @@ class BaseFuelPriceProvider(ABC):
         """
         return False
 
+    @property
+    def sensor_name(self) -> str:
+        """Entity name shown in HA, e.g. 'Price Change', 'Current Price'."""
+        return "Price Change"
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        """Unit of the sensor's native_value."""
+        return "¢/L"
+
     @classmethod
     def get_supported_cities(cls) -> list[str]:
         """Return the static, known-good list of supported cities/regions."""

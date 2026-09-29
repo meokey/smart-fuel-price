@@ -9,7 +9,7 @@ import requests
 
 from sfp_providers.affordableenergy_ca import AffordableEnergyCaProvider
 from sfp_providers.citynews_ca import CityNewsCaProvider
-
+from sfp_providers.gasbuddy_ca import GasBuddyStationProvider
 
 class FakeResponse:
     def __init__(self, text, status_code=200):
@@ -158,3 +158,60 @@ def test_gaswizard_no_change_day_still_parses():
     assert data["current_price"] == pytest.approx(181.9)
     assert data["trend"] == "stable"
     assert "Sep 28, 2026" in data["effective_date_str"]
+
+GASBUDDY_STATION_JSON = {
+    "station": {
+        "Name": "Costco",
+        "Address": "90 Windfields Farm Dr E",
+        "City": "Oshawa",
+        "State": "ON",
+        "ZipCode": "L1H 0A1",
+        "Lat": 43.94,
+        "Lng": -78.83,
+        "APIFuel": [
+            {"Id": 1, "Available": True, "DisplayName": "Regular"},
+            {"Id": 2, "Available": True, "DisplayName": "Premium"},
+        ],
+        "Fuels": [
+            {"FuelType": 1, "CreditPrice": {"Amount": 1.649, "TimePosted": "/Date(1758931200000)/"}},
+            {"FuelType": 2, "CreditPrice": {"Amount": 1.799, "TimePosted": "/Date(1758931200000)/"}},
+        ],
+    }
+}
+
+
+class FakePostSession(FakeSession):
+    """Extends FakeSession with a matching POST, for GasBuddy's endpoint."""
+
+    def __init__(self, json_response):
+        super().__init__({})
+        self.json_response = json_response
+        self.posted_with = None
+
+    def post(self, url, data=None, **kwargs):
+        self.posted_with = (url, data)
+        resp = FakeResponse("")
+        resp.json = lambda: self.json_response
+        return resp
+
+
+def test_gasbuddy_station_end_to_end():
+    session = FakePostSession(GASBUDDY_STATION_JSON)
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+
+    assert data["is_valid"] is True
+    assert data["state"] == pytest.approx(1.649)
+    assert data["current_price"] == pytest.approx(1.649)
+    assert data["tomorrow_price"] is None
+    assert data["station_name"] == "Costco"
+    assert data["city"] == "Oshawa"
+    assert session.posted_with == (
+        "https://www.gasbuddy.com/gaspricemap/station",
+        {"id": "205748", "fuelTypeId": "1"},
+    )
+
+
+def test_gasbuddy_missing_station_fails_soft():
+    session = FakePostSession({"station": None})
+    data = GasBuddyStationProvider("999999", session=session).fetch_data()
+    assert data["is_valid"] is False
