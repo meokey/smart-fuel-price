@@ -16,15 +16,14 @@
           "station_ids": "Station ID(s), comma-separated. Find one at gasbuddy.com/gaspricemap -> click a station -> the number at the end of the URL (gasbuddy.com/station/<id>).",
           "fuel_grades": "Fuel grade(s) to track"
         }
-}
       }
     },
     "error": {
       "unsupported_city": "The specified city is not supported by the selected provider.",
       "station_ids_required": "Enter at least one GasBuddy station ID.",
-      "unknown_provider": "Selected provider is unknown."
       "fuel_grade_required": "Select at least one fuel grade.",
-      "invalid_station_id": "One or more station IDs could not be validated against GasBuddy -- double check them."
+      "invalid_station_id": "One or more station IDs could not be validated against GasBuddy -- double check them.",
+      "unknown_provider": "Selected provider is unknown."
     },
     "abort": {
       "already_configured": "This provider/city (or station selection) is already configured."
