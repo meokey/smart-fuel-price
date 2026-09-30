@@ -5,6 +5,7 @@ All data source plugins must inherit from this class.
 
 import logging
 import re
+from datetime import timedelta
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -25,6 +26,10 @@ DEFAULT_HEADERS = {
 # Matches the first int/decimal number in a string, e.g. "7 cent(s)" -> "7"
 _NUMBER_RE = re.compile(r"(\d+(?:\.\d+)?)")
 
+@property
+def scan_interval(self) -> timedelta:
+    """Suggested minimum time between fetches for this provider."""
+    return timedelta(hours=4)
 
 def first_number(text: str | None) -> float | None:
     """Extract the first int/decimal number found in text, or None."""
@@ -95,6 +100,17 @@ class BaseFuelPriceProvider(ABC):
         so the config flow knows to prompt for it.
         """
         return False
+
+    @property
+    def scan_interval(self) -> timedelta:
+        """Suggested minimum time between fetches for this provider.
+
+        Providers backed by a slow-changing source (a once-daily
+        forecast) should keep this long to avoid hammering the site;
+        providers backed by a live, frequently-updated feed should
+        override with something shorter.
+        """
+        return timedelta(hours=4)
 
     @property
     def sensor_name(self) -> str:
@@ -173,3 +189,4 @@ class BaseFuelPriceProvider(ABC):
         response = self._session.get(url, **kwargs)
         response.raise_for_status()
         return response
+

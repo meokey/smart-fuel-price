@@ -229,3 +229,25 @@ def test_all_provider_modules_import_cleanly():
         "affordableenergy_ca", "gasbuddy_ca", "fuelwise_app",
     ):
         importlib.import_module(f"sfp_providers.{module_name}")
+
+class FakeTextPostSession(FakeSession):
+    """POST returns a plain-text (non-JSON) response, simulating a bot-block page."""
+
+    def __init__(self, text="<html>blocked</html>"):
+        super().__init__({})
+        self.text_response = text
+
+    def post(self, url, data=None, **kwargs):
+        resp = FakeResponse(self.text_response)
+
+        def _raise_json_error():
+            import json
+            raise json.JSONDecodeError("Expecting value", self.text_response, 0)
+
+        resp.json = _raise_json_error
+        return resp
+
+def test_gasbuddy_non_json_response_fails_soft():
+    session = FakeTextPostSession()
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+    assert data["is_valid"] is False

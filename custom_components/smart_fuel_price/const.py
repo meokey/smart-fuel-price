@@ -9,6 +9,14 @@ CONF_API_KEY = "api_key"
 CONF_DISABLED_ATTRIBUTES = "disabled_attributes"
 CONF_STATION_IDS = "station_ids"
 
+CONF_FUEL_GRADES = "fuel_grades"
+GASBUDDY_FUEL_GRADES = {
+    "regular": "Regular",
+    "midgrade": "Midgrade",
+    "premium": "Premium",
+    "diesel": "Diesel",
+}
+
 # List of available providers (Factory mapping will happen in sensor.py)
 AVAILABLE_PROVIDERS = {
     "affordableenergy_ca": "Canada (Gas Wizard)",
@@ -32,4 +40,5 @@ OPTIONAL_ATTRIBUTES = [
     "station_name",
     "address",
     "province_or_state",
+    "last_reported_str",
 ]

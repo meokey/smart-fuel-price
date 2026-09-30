@@ -5,16 +5,20 @@ from datetime import timedelta
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.const import CONF_NAME
-from homeassistant.util import Throttle
+from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, CONF_PROVIDER, CONF_CITY, CONF_API_KEY, CONF_STATION_IDS, CONF_DISABLED_ATTRIBUTES
+from .const import DOMAIN, CONF_PROVIDER, CONF_CITY, CONF_STATION_IDS, CONF_FUEL_GRADES, CONF_DISABLED_ATTRIBUTES
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
 from .providers.gasbuddy_ca import GasBuddyStationProvider
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(hours=4)
+# Underlying HA poll trigger -- short enough to satisfy the fastest
+# provider (GasBuddy's 30 min). Slower providers simply no-op most of
+# these calls via their own scan_interval (see SmartFuelSensor.async_update).
+SCAN_INTERVAL = timedelta(minutes=15)
+
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Set up the Smart Fuel Price sensor(s) from a config entry."""
@@ -27,20 +31,32 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
     if provider_type == "gasbuddy_ca":
         station_ids = [s.strip() for s in data.get(CONF_STATION_IDS, "").split(",") if s.strip()]
-        entities = [
-            SmartFuelSensor(
-                f"{name} - {station_id}",
-                GasBuddyStationProvider(station_id),
-                disabled_attrs,
-                f"{config_entry.entry_id}_{station_id}",
-            )
-            for station_id in station_ids
-        ]
+        fuel_grades = data.get(CONF_FUEL_GRADES, ["regular"])
+
+        entities = []
+        for station_id in station_ids:
+            for grade in fuel_grades:
+                provider = GasBuddyStationProvider(station_id, grade)
+                # One-time pre-fetch so the device's name/area are correct
+                # from the moment the entity is created, not just after
+                # the first scheduled poll.
+                preview = await hass.async_add_executor_job(provider.fetch_data)
+                city = preview.get("city") or station_id
+                station_name = preview.get("station_name") or f"Station {station_id}"
+
+                entities.append(
+                    SmartFuelSensor(
+                        f"Smart Fuel Price - {city} - GasBuddy ({station_name} - {grade.capitalize()})",
+                        provider,
+                        disabled_attrs,
+                        f"{config_entry.entry_id}_{station_id}_{grade}",
+                        suggested_area=city if preview.get("city") else None,
+                    )
+                )
         async_add_entities(entities, True)
         return
 
     city = data.get(CONF_CITY).lower()
-    api_key = data.get(CONF_API_KEY, "")
 
     if provider_type == "fuelwise_app":
         provider = FuelwiseAppProvider(city)
@@ -49,7 +65,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     else:
         provider = AffordableEnergyCaProvider(city)
 
-    sensor = SmartFuelSensor(name, provider, disabled_attrs, config_entry.entry_id)
+    sensor = SmartFuelSensor(
+        name, provider, disabled_attrs, config_entry.entry_id,
+        suggested_area=city.capitalize(),
+    )
     async_add_entities([sensor], True)
 
 
@@ -59,9 +78,10 @@ class SmartFuelSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, name, provider, disabled_attributes, entry_id):
+    def __init__(self, device_name, provider, disabled_attributes, entry_id, suggested_area=None):
         self._provider = provider
         self._disabled_attributes = disabled_attributes
+        self._last_fetch_time = None
 
         self._attr_name = self._provider.sensor_name
         self._attr_native_unit_of_measurement = self._provider.native_unit_of_measurement
@@ -70,9 +90,10 @@ class SmartFuelSensor(SensorEntity):
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
-            name=name,
+            name=device_name,
             manufacturer=self._provider.name,
             model=f"{self._provider.city.capitalize()} Fuel Data",
+            suggested_area=suggested_area,
         )
 
         self._state = None
@@ -91,12 +112,19 @@ class SmartFuelSensor(SensorEntity):
             if k not in self._disabled_attributes
         }
 
-    @Throttle(SCAN_INTERVAL)
     async def async_update(self):
-        """Defensive async update to fetch data without blocking the event loop."""
+        """Fetch data, throttled per-provider (see BaseFuelPriceProvider.scan_interval)."""
+        now = dt_util.utcnow()
+        if (
+            self._last_fetch_time is not None
+            and now - self._last_fetch_time < self._provider.scan_interval
+        ):
+            return  # Too soon for this provider -- keep the previous state.
+
         try:
             _LOGGER.debug("Updating fuel price sensor via %s for city %s", self._provider.name, self._provider.city)
             data = await self.hass.async_add_executor_job(self._provider.fetch_data)
+            self._last_fetch_time = now
 
             if data:
                 self._state = data.get("state")
