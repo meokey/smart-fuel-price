@@ -215,3 +215,17 @@ def test_gasbuddy_missing_station_fails_soft():
     session = FakePostSession({"station": None})
     data = GasBuddyStationProvider("999999", session=session).fetch_data()
     assert data["is_valid"] is False
+
+# 追加到 tests/test_providers.py
+
+def test_all_provider_modules_import_cleanly():
+    """Guards against NameError-in-annotations bugs that Python 3.14's
+    deferred annotation evaluation (PEP 649) can silently mask -- this
+    failed to catch citynews_ca.py using Dict/List/Optional/Tuple
+    without importing them, since nothing introspected the annotations."""
+    import importlib
+    for module_name in (
+        "base", "vendor_widgets", "citynews_ca",
+        "affordableenergy_ca", "gasbuddy_ca", "fuelwise_app",
+    ):
+        importlib.import_module(f"sfp_providers.{module_name}")

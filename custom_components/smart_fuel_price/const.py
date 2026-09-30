@@ -12,19 +12,24 @@ CONF_STATION_IDS = "station_ids"
 # List of available providers (Factory mapping will happen in sensor.py)
 AVAILABLE_PROVIDERS = {
     "affordableenergy_ca": "Canada (Gas Wizard)",
-    "fuelwise_app": "Ontario / GTA (Fuelwise)",
+#    "fuelwise_app": "Ontario / GTA (Fuelwise)",
     "citynews_ca": "Canada (CityNews)",
     "gasbuddy_ca": "GasBuddy (Station)"
 }
 
 # Attributes that users can choose to disable in Options Flow
 OPTIONAL_ATTRIBUTES = [
-    "tomorrow_price", 
+    "tomorrow_price",
+    "current_price",
     "trend", 
     "effective_date_str", 
     "is_valid", 
     "is_dropping", 
     "is_rising", 
     "provider_name", 
-    "city"
+    "city",
+    "station_id",
+    "station_name",
+    "address",
+    "province_or_state",
 ]

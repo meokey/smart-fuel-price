@@ -12,10 +12,8 @@ import homeassistant.helpers.config_validation as cv
 
 from .const import (
     DOMAIN,
-    DEFAULT_NAME,
     CONF_PROVIDER,
     CONF_CITY,
-    CONF_API_KEY,
     CONF_STATION_IDS,
     CONF_DISABLED_ATTRIBUTES,
     AVAILABLE_PROVIDERS,
@@ -24,7 +22,6 @@ from .const import (
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
-from .providers.gasbuddy_ca import GasBuddyStationProvider
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,12 +39,7 @@ _CITY_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # 1 week -- these lists barely chang
 
 
 async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
-    """Return cities for a provider, refreshed at most weekly.
-
-    Order of preference: fresh cache -> live discover_cities() -> static
-    get_supported_cities(). Results are persisted via HA's Store helper
-    so a normal restart doesn't re-trigger a live fetch.
-    """
+    """Return cities for a provider, refreshed at most weekly."""
     provider_key = provider_key.lower()
     provider_cls = _PROVIDER_CLASSES.get(provider_key, AffordableEnergyCaProvider)
 
@@ -59,8 +51,6 @@ async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
     if entry and (now - entry["fetched_at"]) < _CITY_CACHE_TTL_SECONDS:
         return entry["cities"]
 
-    # Cache missing or stale -- best-effort live refresh. discover_cities()
-    # does a blocking network call, so it must run off the event loop.
     discovered = await hass.async_add_executor_job(provider_cls.discover_cities)
     cities = sorted(discovered.keys()) if discovered else provider_cls.get_supported_cities()
 
@@ -72,13 +62,20 @@ async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
 
 
 class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle Config Flow allowing multiple sensor instances."""
+    """Handle Config Flow allowing multiple sensor instances.
+
+    Two-step flow: step "user" picks only the provider; step "details"
+    then shows fields specific to that provider (city, or station IDs
+    for GasBuddy). A single flat form can't do this -- HA doesn't
+    re-render a form when one field changes, only when the whole form is
+    submitted, so a single-step form always showed whatever was relevant
+    to the *previous* selection, not the current one.
+    """
 
     VERSION = 1
 
     def __init__(self):
-        """Initialize flow state."""
-        self._selected_provider = "affordableenergy_ca"
+        self._selected_provider = None
 
     async def async_step_import(self, user_input=None):
         """Handle legacy configuration.yaml migration."""
@@ -94,14 +91,22 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_user(self, user_input=None):
-        """Handle step 1: Choose Provider and City (or Station IDs for GasBuddy)."""
+        """Step 1: choose the provider."""
+        if user_input is not None:
+            self._selected_provider = user_input[CONF_PROVIDER].lower()
+            return await self.async_step_details()
+
+        schema = vol.Schema({
+            vol.Required(CONF_PROVIDER, default="affordableenergy_ca"): vol.In(AVAILABLE_PROVIDERS),
+        })
+        return self.async_show_form(step_id="user", data_schema=schema)
+
+    async def async_step_details(self, user_input=None):
+        """Step 2: provider-specific fields (city, or station IDs for GasBuddy)."""
         errors = {}
+        provider_key = self._selected_provider
 
         if user_input is not None:
-            provider_key = user_input[CONF_PROVIDER].lower()
-            self._selected_provider = provider_key  # keep the redisplayed form in sync
-            api_key = user_input.get(CONF_API_KEY, "").strip()
-
             if provider_key == "gasbuddy_ca":
                 raw_ids = user_input.get(CONF_STATION_IDS, "")
                 station_ids = [s.strip() for s in raw_ids.split(",") if s.strip()]
@@ -122,7 +127,6 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
             else:
                 city = user_input.get(CONF_CITY, "").lower()
-
                 supported_cities = await _get_cities_for_provider(self.hass, provider_key)
                 if city not in supported_cities and supported_cities:
                     errors["base"] = "unsupported_city"
@@ -131,35 +135,27 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     unique_id = f"{provider_key}_{city}"
                     await self.async_set_unique_id(unique_id)
                     self._abort_if_unique_id_configured()
-                    title_name = f"{AVAILABLE_PROVIDERS.get(provider_key, provider_key)} - {city.capitalize()}"
                     return self.async_create_entry(
-                        title=title_name,
-                        data={
-                            CONF_PROVIDER: provider_key,
-                            CONF_CITY: city,
-                            CONF_API_KEY: api_key,
-                        }
+                        title=f"{AVAILABLE_PROVIDERS.get(provider_key, provider_key)} - {city.capitalize()}",
+                        data={CONF_PROVIDER: provider_key, CONF_CITY: city},
                     )
 
-        # Build the (re)displayed form using the most recently selected provider.
-        default_city = "mississauga"
-        supported_cities = await _get_cities_for_provider(self.hass, self._selected_provider)
-        if default_city not in supported_cities and supported_cities:
-            default_city = supported_cities[0] if supported_cities else default_city
-
-        schema_dict = {
-            vol.Required(CONF_PROVIDER, default=self._selected_provider): vol.In(AVAILABLE_PROVIDERS),
-        }
-        if self._selected_provider == "gasbuddy_ca":
-            schema_dict[vol.Required(CONF_STATION_IDS)] = str
+        if provider_key == "gasbuddy_ca":
+            schema = vol.Schema({vol.Required(CONF_STATION_IDS): str})
         else:
-            schema_dict[vol.Required(CONF_CITY, default=default_city)] = (
-                vol.In(supported_cities) if supported_cities else str
-            )
-            schema_dict[vol.Optional(CONF_API_KEY, default="")] = str
+            supported_cities = await _get_cities_for_provider(self.hass, provider_key)
+            default_city = supported_cities[0] if supported_cities else "mississauga"
+            schema = vol.Schema({
+                vol.Required(CONF_CITY, default=default_city): (
+                    vol.In(supported_cities) if supported_cities else str
+                ),
+            })
 
         return self.async_show_form(
-            step_id="user", data_schema=vol.Schema(schema_dict), errors=errors
+            step_id="details",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"provider": AVAILABLE_PROVIDERS.get(provider_key, provider_key)},
         )
 
     @staticmethod

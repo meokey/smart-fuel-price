@@ -29,7 +29,7 @@ from .base import BaseFuelPriceProvider
 
 _LOGGER = logging.getLogger(__name__)
 
-CITY_MAP: Dict[str, Dict[str, str]] = {
+CITY_MAP: dict[str, dict[str, str]] = {
     "toronto": {"subdomain": "toronto", "parser": "forecast"},
     "ottawa": {"subdomain": "ottawa", "parser": "forecast"},
     "kitchener": {"subdomain": "kitchener", "parser": "forecast"},
@@ -60,11 +60,11 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         return "CityNews Canada"
 
     @classmethod
-    def get_supported_cities(cls) -> List[str]:
+    def get_supported_cities(cls) -> list[str]:
         return list(CITY_MAP.keys())
 
     @classmethod
-    def discover_cities(cls) -> Optional[Dict[str, str]]:
+    def discover_cities(cls) -> dict[str, str] | None:
         """Best-effort live discovery via citynews.ca's city switcher.
 
         Candidate list only -- not verified to have a working Gas Prices
@@ -90,7 +90,7 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
 
         return {slug.lower(): label.strip() for slug, label in matches}
 
-    def _parse_data(self) -> Dict[str, Any]:
+    def _parse_data(self) -> dict[str, Any]:
         city_info = CITY_MAP.get(self.city)
         if not city_info:
             _LOGGER.warning(
@@ -135,7 +135,7 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         )
         return {"city": subdomain, "is_valid": False}
 
-    def _fetch_gas_prices_page(self, subdomain: str) -> Optional[Tuple[str, str]]:
+    def _fetch_gas_prices_page(self, subdomain: str) -> tuple[str, str] | None:
         """Try each known URL slug in turn; return (url, html) for the first hit."""
         for path_template in GAS_PRICES_PATH_CANDIDATES:
             path = path_template.format(subdomain=subdomain)

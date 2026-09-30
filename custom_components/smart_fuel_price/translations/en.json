@@ -3,21 +3,27 @@
     "step": {
       "user": {
         "title": "Configure Smart Fuel Price",
-        "description": "Select your fuel price data provider and target city. If the city is invalid for the provider, setup will fail.",
+        "description": "Choose a fuel price data provider. The next step will ask for the details that provider needs (a city, or GasBuddy station IDs).",
         "data": {
-          "provider": "Data Provider",
+          "provider": "Data Provider"
+        }
+      },
+      "details": {
+        "title": "Provider Details",
+        "description": "Configure {provider}.",
+        "data": {
           "city": "City Name (e.g. mississauga, toronto)",
-          "api_key": "API Key (Only for GlobalPetrolPrices)"
+          "station_ids": "Station ID(s), comma-separated. Find one at gasbuddy.com/gaspricemap -> click a station -> the number at the end of the URL (gasbuddy.com/station/<id>)."
         }
       }
     },
     "error": {
       "unsupported_city": "The specified city is not supported by the selected provider.",
-      "invalid_api_key": "API Key is required for this provider.",
+      "station_ids_required": "Enter at least one GasBuddy station ID.",
       "unknown_provider": "Selected provider is unknown."
     },
     "abort": {
-      "already_configured": "This provider and city combination is already configured."
+      "already_configured": "This provider/city (or station selection) is already configured."
     }
   },
   "options": {

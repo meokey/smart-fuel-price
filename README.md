@@ -13,10 +13,9 @@ A Home Assistant custom integration that provides real-time and next-day fuel pr
 
 ## Features
 
-- **Multi-Provider Architecture**: Supports `AffordableEnergy` (Gas Wizard), `Fuelwise`, `CityNews Canada`, and `GlobalPetrolPrices`.
+- **Multi-Provider Architecture**: Supports `AffordableEnergy` (Gas Wizard), `CityNews Canada`, and `GasBuddy` (per-station).
 - **UI Configuration (Config Flow)**: Easily add and configure multiple fuel sensors directly from Home Assistant Devices & Services.
 - **Dynamic Attribute Filtering (Options Flow)**: Enable or disable specific state attributes via UI settings without modifying code.
-- **Auto Location Detection**: Guesses the closest supported city based on your Home Assistant zone location.
 - **YAML Migration Support**: Automatically migrates legacy `configuration.yaml` definitions into UI Config Entries seamlessly.
 
 ---
@@ -48,7 +47,8 @@ After installation, configure your sensors through the Home Assistant UI:
 1. Go to **Settings** -> **Devices & Services**.
 2. Click **Add Integration** in the bottom right corner.
 3. Search for **Smart Fuel Price**.
-4. Select your desired **Provider** and **City** from the dynamic dropdown menu.
+4. Select your desired **Provider**, then fill in the next step's details
+   (a **City**, or GasBuddy **Station ID(s)**).
 5. Click **Submit**.
 
 > **Note**: You can add multiple instances of this integration for different cities or providers!
@@ -66,12 +66,12 @@ To customize which attributes are sent to your database:
 
 ## Supported Providers & Cities
 
+<!-- Supported Providers & Cities 表格 -->
 | Provider Identifier | Target Region | Dynamic Cities Supported |
 | :--- | :--- | :--- |
 | `affordableenergy_ca` | Canada (Nationwide) | `mississauga`, `toronto`, `vancouver`, `calgary`, `ottawa`, `montreal` |
-| `fuelwise_app` | Ontario / GTA | `toronto`, `mississauga`, `ottawa`, `hamilton`, `kitchener` |
-| `citynews_ca` | Canada Major Cities | `toronto`, `ottawa`, `kitchener`, `calgary` |
-| `globalpetrolprices` | Global (API Key required) | Custom City Query |
+| `citynews_ca` | Canada Major Cities | `toronto`, `ottawa`, `kitchener` (`calgary` currently unsupported -- see below) |
+| `gasbuddy_ca` | Any (per-station) | N/A -- configured by station ID, see [GasBuddy section](#gasbuddy-per-station) below |
 
 ---
 
