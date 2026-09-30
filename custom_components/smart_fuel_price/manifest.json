@@ -6,8 +6,8 @@
   "documentation": "https://github.com/meokey/smart-fuel-price",
   "integration_type": "sensor",
   "iot_class": "cloud_polling",
-  "version": "2.3.10",
-  "requirements": ["voluptuous"],
+  "version": "2.3.11",
+  "requirements": ["voluptuous", "requests"],
   "dependencies": [],
   "issue_tracker": "https://github.com/meokey/smart-fuel-price/issues"
 }

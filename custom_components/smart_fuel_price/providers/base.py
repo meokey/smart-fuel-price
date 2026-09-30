@@ -26,11 +26,6 @@ DEFAULT_HEADERS = {
 # Matches the first int/decimal number in a string, e.g. "7 cent(s)" -> "7"
 _NUMBER_RE = re.compile(r"(\d+(?:\.\d+)?)")
 
-@property
-def scan_interval(self) -> timedelta:
-    """Suggested minimum time between fetches for this provider."""
-    return timedelta(hours=4)
-
 def first_number(text: str | None) -> float | None:
     """Extract the first int/decimal number found in text, or None."""
     if not text:

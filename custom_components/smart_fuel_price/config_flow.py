@@ -1,5 +1,6 @@
 """Config flow for Smart Fuel Price supporting dynamic cities and multi-instance."""
 
+import asyncio
 import logging
 import time
 
@@ -24,6 +25,7 @@ from .const import (
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
+from .providers.gasbuddy_ca import GasBuddyStationProvider
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +63,12 @@ async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
         await store.async_save(cache)
 
     return cities or provider_cls.get_supported_cities()
+
+
+async def _validate_station_id(hass, station_id: str, fuel_grade: str) -> bool:
+    provider = GasBuddyStationProvider(station_id, fuel_grade)
+    result = await hass.async_add_executor_job(provider.fetch_data)
+    return bool(result.get("is_valid"))
 
 
 class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -113,24 +121,22 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 raw_ids = user_input.get(CONF_STATION_IDS, "")
                 station_ids = [s.strip() for s in raw_ids.split(",") if s.strip()]
                 fuel_grades = user_input.get(CONF_FUEL_GRADES, [])
+
                 if not station_ids:
                     errors["base"] = "station_ids_required"
                 elif not fuel_grades:
                     errors["base"] = "fuel_grade_required"
                 else:
                     # Validate every station ID live so a typo is caught
-                    # now, not silently at the first sensor poll.
-                    import asyncio
-                    from .providers.gasbuddy_ca import GasBuddyStationProvider
-
-                    async def _check(station_id: str) -> bool:
-                        provider = GasBuddyStationProvider(station_id, fuel_grades[0])
-                        result = await self.hass.async_add_executor_job(provider.fetch_data)
-                        return bool(result.get("is_valid"))
-
-                    results = await asyncio.gather(*(_check(s) for s in station_ids))
-                    bad_ids = [s for s, ok in zip(station_ids, results) if not ok]
-                    if bad_ids:
+                    # now, not silently at the first sensor poll. Only
+                    # checks the first selected grade per station -- a
+                    # station missing ONE of several selected grades
+                    # still passes here and simply reports is_valid=False
+                    # for that specific (station, grade) sensor later.
+                    results = await asyncio.gather(
+                        *(_validate_station_id(self.hass, s, fuel_grades[0]) for s in station_ids)
+                    )
+                    if not all(results):
                         errors["base"] = "invalid_station_id"
 
                 if not errors:
@@ -158,7 +164,7 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._abort_if_unique_id_configured()
                     return self.async_create_entry(
                         title=f"Smart Fuel Price - {city.capitalize()} - {AVAILABLE_PROVIDERS.get(provider_key, provider_key)}",
-                            data={CONF_PROVIDER: provider_key, CONF_CITY: city},
+                        data={CONF_PROVIDER: provider_key, CONF_CITY: city},
                     )
 
         if provider_key == "gasbuddy_ca":
@@ -166,7 +172,7 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_STATION_IDS): str,
                 vol.Required(CONF_FUEL_GRADES, default=["regular"]): cv.multi_select(GASBUDDY_FUEL_GRADES),
             })
-else:
+        else:
             supported_cities = await _get_cities_for_provider(self.hass, provider_key)
             default_city = supported_cities[0] if supported_cities else "mississauga"
             schema = vol.Schema({

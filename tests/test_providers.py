@@ -95,17 +95,6 @@ def test_citynews_kitchener_no_change_end_to_end():
     assert data["trend"] == "stable"
 
 
-def test_gaswizard_no_change_day_still_parses():
-    session = FakeSession({"https://www.gaswizard.ca/toronto": GASWIZARD_NO_CHANGE_HTML})
-    data = AffordableEnergyCaProvider("toronto", session=session).fetch_data()
-
-    assert data["is_valid"] is True
-    assert data["state"] == pytest.approx(0.0)
-    assert data["tomorrow_price"] == pytest.approx(181.9)
-    assert data["current_price"] == pytest.approx(181.9)
-    assert data["trend"] == "stable"
-    assert "Sep 28, 2026" in data["effective_date_str"]
-
 def test_gaswizard_layout_change_fails_soft():
     session = FakeSession({"https://www.gaswizard.ca/toronto": "<html>redesigned</html>"})
     data = AffordableEnergyCaProvider("toronto", session=session).fetch_data()

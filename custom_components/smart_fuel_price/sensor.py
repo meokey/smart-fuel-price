@@ -35,22 +35,24 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
         entities = []
         for station_id in station_ids:
+            device_key = f"{config_entry.entry_id}_{station_id}"
+            device_city = None
+            device_station_name = None
             for grade in fuel_grades:
                 provider = GasBuddyStationProvider(station_id, grade)
-                # One-time pre-fetch so the device's name/area are correct
-                # from the moment the entity is created, not just after
-                # the first scheduled poll.
                 preview = await hass.async_add_executor_job(provider.fetch_data)
-                city = preview.get("city") or station_id
-                station_name = preview.get("station_name") or f"Station {station_id}"
+                if device_city is None:
+                    device_city = preview.get("city") or station_id
+                    device_station_name = preview.get("station_name") or f"Station {station_id}"
 
                 entities.append(
                     SmartFuelSensor(
-                        f"Smart Fuel Price - {city} - GasBuddy ({station_name} - {grade.capitalize()})",
+                        f"Smart Fuel Price - {device_city} - GasBuddy ({device_station_name})",
                         provider,
                         disabled_attrs,
-                        f"{config_entry.entry_id}_{station_id}_{grade}",
-                        suggested_area=city if preview.get("city") else None,
+                        device_key,
+                        unique_suffix=grade,
+                        suggested_area=device_city,
                     )
                 )
         async_add_entities(entities, True)
@@ -78,7 +80,7 @@ class SmartFuelSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, device_name, provider, disabled_attributes, entry_id, suggested_area=None):
+    def __init__(self, device_name, provider, disabled_attributes, device_key, unique_suffix=None, suggested_area=None):
         self._provider = provider
         self._disabled_attributes = disabled_attributes
         self._last_fetch_time = None
@@ -86,10 +88,13 @@ class SmartFuelSensor(SensorEntity):
         self._attr_name = self._provider.sensor_name
         self._attr_native_unit_of_measurement = self._provider.native_unit_of_measurement
         self._attr_icon = "mdi:gas-station"
-        self._attr_unique_id = f"smart_fuel_price_{entry_id}"
+        self._attr_unique_id = (
+            f"smart_fuel_price_{device_key}_{unique_suffix}"
+            if unique_suffix else f"smart_fuel_price_{device_key}"
+        )
 
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
+            identifiers={(DOMAIN, device_key)},
             name=device_name,
             manufacturer=self._provider.name,
             model=f"{self._provider.city.capitalize()} Fuel Data",

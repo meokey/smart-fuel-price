@@ -66,7 +66,6 @@ To customize which attributes are sent to your database:
 
 ## Supported Providers & Cities
 
-<!-- Supported Providers & Cities 表格 -->
 | Provider Identifier | Target Region | Dynamic Cities Supported |
 | :--- | :--- | :--- |
 | `affordableenergy_ca` | Canada (Nationwide) | `mississauga`, `toronto`, `vancouver`, `calgary`, `ottawa`, `montreal` |
