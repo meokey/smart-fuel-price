@@ -240,3 +240,14 @@ def test_gasbuddy_non_json_response_fails_soft():
     session = FakeTextPostSession()
     data = GasBuddyStationProvider("205748", session=session).fetch_data()
     assert data["is_valid"] is False
+
+def test_city_lists_are_well_formed():
+    """Cheap, no-network sanity check on each provider's own city list."""
+    from sfp_providers.affordableenergy_ca import AffordableEnergyCaProvider
+    from sfp_providers.citynews_ca import CityNewsCaProvider
+
+    for provider_cls in (CityNewsCaProvider, AffordableEnergyCaProvider):
+        cities = provider_cls.get_supported_cities()
+        assert cities, f"{provider_cls.__name__} returned an empty city list"
+        assert len(cities) == len(set(cities)), f"{provider_cls.__name__} has duplicate cities"
+        assert all(c == c.lower() for c in cities), f"{provider_cls.__name__} has non-lowercase city slugs"
