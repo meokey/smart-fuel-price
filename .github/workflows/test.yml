@@ -15,4 +15,5 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install pytest requests
-      - run: pytest -v
+      - run: pip install -r requirements_test.txt
+      - run: pytest -v -m "not live"
