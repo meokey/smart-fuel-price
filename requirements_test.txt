@@ -1,3 +1,0 @@
-pytest
-requests
-pytest-homeassistant-custom-component
