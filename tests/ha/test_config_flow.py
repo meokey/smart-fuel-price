@@ -20,6 +20,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.smart_fuel_price.const import DOMAIN
 
+@pytest.mark.asyncio
 async def test_user_step_then_details_step_for_gaswizard(hass):
     """Step 1 (provider) -> step 2 (city) happy path, and the fields
     shown in step 2 must match the provider just picked -- this is the
@@ -44,7 +45,7 @@ async def test_user_step_then_details_step_for_gaswizard(hass):
     assert result["title"] == "Smart Fuel Price - Toronto - Canada (Gas Wizard)"
     assert result["data"]["city"] == "toronto"
 
-
+@pytest.mark.asyncio
 async def test_details_step_rejects_unsupported_city(hass):
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
@@ -58,7 +59,7 @@ async def test_details_step_rejects_unsupported_city(hass):
     assert result["type"] is FlowResultType.FORM
     assert result["errors"]["base"] == "unsupported_city"
 
-
+@pytest.mark.asyncio
 async def test_gasbuddy_details_step_shows_station_fields_not_city(hass):
     """The original bug report: GasBuddy showed a City field instead
     of Station IDs until a failed submit forced a re-render."""
@@ -72,7 +73,7 @@ async def test_gasbuddy_details_step_shows_station_fields_not_city(hass):
     assert "station_ids" in result["data_schema"].schema
     assert "city" not in result["data_schema"].schema
 
-
+@pytest.mark.asyncio
 async def test_gasbuddy_requires_station_ids(hass):
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
@@ -85,7 +86,7 @@ async def test_gasbuddy_requires_station_ids(hass):
     )
     assert result["errors"]["base"] == "station_ids_required"
 
-
+@pytest.mark.asyncio
 async def test_gasbuddy_requires_fuel_grade(hass):
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
@@ -98,7 +99,7 @@ async def test_gasbuddy_requires_fuel_grade(hass):
     )
     assert result["errors"]["base"] == "fuel_grade_required"
 
-
+@pytest.mark.asyncio
 async def test_gasbuddy_happy_path_creates_entry(hass):
     with patch(
         "custom_components.smart_fuel_price.providers.gasbuddy_ca."
@@ -119,7 +120,7 @@ async def test_gasbuddy_happy_path_creates_entry(hass):
     assert result["data"]["station_ids"] == "205748, 123456"
     assert result["data"]["fuel_grades"] == ["regular", "diesel"]
 
-
+@pytest.mark.asyncio
 async def test_duplicate_entry_is_aborted(hass):
     MockConfigEntry(
         domain=DOMAIN,

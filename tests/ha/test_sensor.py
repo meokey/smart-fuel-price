@@ -26,7 +26,7 @@ _GASWIZARD_RESULT = {
     "effective_date_str": "Monday Sep 28, 2026",
 }
 
-
+@pytest.mark.asyncio
 async def test_city_provider_creates_one_sensor(hass):
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -48,7 +48,7 @@ async def test_city_provider_creates_one_sensor(hass):
     assert states[0].state == "-7.0"
     assert states[0].attributes["current_price"] == 188.9
 
-
+@pytest.mark.asyncio
 async def test_gasbuddy_multi_grade_shares_one_device(hass):
     """Regression test for the device-fragmentation bug: two fuel
     grades for the SAME station must land on ONE HA device, not two."""
