@@ -28,14 +28,23 @@ Response (abridged):
 
 TimePosted is .NET JSON-date format: "/Date(<epoch_ms>)/".
 
-KNOWN RISK: a manual test against this endpoint (no browser session)
-returned a non-JSON response rather than the expected payload -- possibly
-bot-protection GasBuddy has added since Red5d's integration was written.
-Two defensive measures below: priming the session with a GET to the map
-page first (mimics a real browser's cookie-setting behaviour before its
-AJAX call), and never crashing on a non-JSON response -- if the JSON
-parse fails, is_valid is False and the raw response body is logged for
-diagnosis, rather than raising.
+ROBUSTNESS NOTES:
+  * One response already contains every fuel grade for a station, but
+    each (station, grade) sensor used to fetch independently -- meaning
+    4 grades on one station meant 4 redundant requests per poll cycle.
+    _fetch_station_json() now caches the raw response per station_id at
+    the class level (shared across every GasBuddyStationProvider
+    instance in this process), so only the first grade's poll in a given
+    window actually hits the network. This matters doubly now that
+    GasBuddy appears to have tightened bot-detection (observed firsthand
+    via the website's own UI returning "An error occurred retrieving
+    stations for this area", not just via this integration) -- fewer
+    redundant requests means less exposure to that.
+  * HTTP 403/429 are treated as a distinct, expected "rate-limited or
+    temporarily blocked" case with its own log message, rather than
+    falling through to the generic network-error path -- so this shows
+    up clearly in HA's log as "try again later", not "something is
+    broken".
 
 Grade-name matching is deliberately loose (see _GRADE_ALIASES) since the
 exact DisplayName strings GasBuddy uses for non-Regular grades haven't
@@ -49,6 +58,7 @@ at the end of the URL (https://www.gasbuddy.com/station/<id>).
 
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -94,6 +104,11 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
 
     API_URL = "https://www.gasbuddy.com/gaspricemap/station"
 
+    # Shared across every instance in this process -- see module
+    # docstring. {station_id: (fetched_at_epoch, raw_json)}
+    _station_cache: dict[str, tuple[float, dict]] = {}
+    _CACHE_TTL_SECONDS = 20 * 60  # a bit under the 30-min scan_interval
+
     def __init__(self, station_id: str, fuel_grade: str = "regular", **kwargs: Any) -> None:
         super().__init__(city=str(station_id), **kwargs)
         self.fuel_grade = fuel_grade.lower()
@@ -120,7 +135,20 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
         # relative to how "live" the underlying data actually is.
         return timedelta(minutes=30)
 
-    def _parse_data(self) -> dict[str, Any]:
+    @classmethod
+    def _clear_station_cache(cls) -> None:
+        """Clear the shared per-station cache. Exposed mainly for tests."""
+        cls._station_cache.clear()
+
+    def _fetch_station_json(self) -> dict[str, Any] | None:
+        """Fetch (or reuse a recent cached copy of) this station's full
+        JSON payload. Returns None on any failure (bad response, rate
+        limit, non-JSON) -- callers treat that as is_valid: False."""
+        now = time.time()
+        cached = GasBuddyStationProvider._station_cache.get(self.station_id)
+        if cached and (now - cached[0]) < self._CACHE_TTL_SECONDS:
+            return cached[1]
+
         # Prime the session the way a real browser would (load the map
         # page, which sets any cookies the API call might expect) before
         # the actual data POST. Failure here is non-fatal -- fall through
@@ -136,6 +164,16 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
             data={"id": self.station_id, "fuelTypeId": "1"},
             timeout=self._timeout,
         )
+
+        if response.status_code in (403, 429):
+            _LOGGER.warning(
+                "[%s] Station '%s' got HTTP %s from GasBuddy -- this looks "
+                "like rate-limiting or temporary bot-protection, not a real "
+                "data problem. Will try again on the next scheduled poll.",
+                self.name, self.station_id, response.status_code,
+            )
+            return None
+
         response.raise_for_status()
 
         try:
@@ -147,6 +185,14 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
                 "last confirmed working. First 200 chars: %r",
                 self.name, self.station_id, response.status_code, response.text[:200],
             )
+            return None
+
+        GasBuddyStationProvider._station_cache[self.station_id] = (now, payload)
+        return payload
+
+    def _parse_data(self) -> dict[str, Any]:
+        payload = self._fetch_station_json()
+        if payload is None:
             return {"is_valid": False}
 
         station = payload.get("station")

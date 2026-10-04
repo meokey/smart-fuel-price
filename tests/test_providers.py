@@ -176,13 +176,35 @@ class FakePostSession(FakeSession):
         super().__init__({})
         self.json_response = json_response
         self.posted_with = None
+        self.post_count = 0  # 新增
 
     def post(self, url, data=None, **kwargs):
+        self.post_count += 1  # 新增
         self.posted_with = (url, data)
         resp = FakeResponse("")
         resp.json = lambda: self.json_response
         return resp
 
+@pytest.fixture(autouse=True)
+def _clear_gasbuddy_station_cache():
+    GasBuddyStationProvider._clear_station_cache()
+    yield
+def test_gasbuddy_shares_one_fetch_across_grades_for_same_station():
+    session = FakePostSession(GASBUDDY_STATION_JSON)
+    GasBuddyStationProvider("205748", "regular", session=session).fetch_data()
+    GasBuddyStationProvider("205748", "premium", session=session).fetch_data()
+    assert session.post_count == 1  # 同一站点，第二次该吃缓存
+
+
+def test_gasbuddy_rate_limited_fails_soft():
+    class _RateLimitedSession(FakePostSession):
+        def post(self, url, data=None, **kwargs):
+            self.post_count += 1
+            return FakeResponse("", status_code=429)
+
+    session = _RateLimitedSession({})
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+    assert data["is_valid"] is False
 
 def test_gasbuddy_station_end_to_end():
     session = FakePostSession(GASBUDDY_STATION_JSON)
