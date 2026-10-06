@@ -1,23 +1,73 @@
 """Sensor platform for Smart Fuel Price (Config Flow enabled)."""
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.storage import Store
 from homeassistant.const import CONF_NAME
-from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, CONF_PROVIDER, CONF_CITY, CONF_STATION_IDS, CONF_FUEL_GRADES, CONF_DISABLED_ATTRIBUTES
+from .const import (
+    DOMAIN,
+    CONF_PROVIDER,
+    CONF_CITY,
+    CONF_STATION_IDS,
+    CONF_FUEL_GRADES,
+    CONF_DISABLED_ATTRIBUTES,
+    CONF_CACHE_TTL_MINUTES,
+    DEFAULT_CACHE_TTL_MINUTES,
+)
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
 from .providers.gasbuddy_ca import GasBuddyStationProvider
 
 _LOGGER = logging.getLogger(__name__)
-# Underlying HA poll trigger -- short enough to satisfy the fastest
-# provider (GasBuddy's 30 min). Slower providers simply no-op most of
-# these calls via their own scan_interval (see SmartFuelSensor.async_update).
+# Underlying HA poll trigger -- the provider's TTL cache (editable in the
+# Options flow) decides whether a poll actually hits the network.
 SCAN_INTERVAL = timedelta(minutes=15)
+
+_FETCH_CACHE_VERSION = 1
+_FETCH_CACHE_KEY = f"{DOMAIN}_fetch_cache"
+
+
+async def _load_fetch_cache(hass) -> dict:
+    """Load the persisted fetch cache ({cache_key: {data, fetched_at}})."""
+    try:
+        return await Store(hass, _FETCH_CACHE_VERSION, _FETCH_CACHE_KEY).async_load() or {}
+    except Exception as err:  # noqa: BLE001 -- cache is best-effort
+        _LOGGER.debug("Could not load fetch cache: %s", err)
+        return {}
+
+
+async def _save_fetch_cache(hass, fetch_cache: dict) -> None:
+    """Persist the fetch cache. Best-effort -- never breaks updates."""
+    try:
+        await Store(hass, _FETCH_CACHE_VERSION, _FETCH_CACHE_KEY).async_save(fetch_cache)
+    except Exception as err:  # noqa: BLE001 -- cache is best-effort
+        _LOGGER.debug("Could not persist fetch cache: %s", err)
+
+
+def _hydrate_provider(provider, fetch_cache: dict) -> None:
+    """Restore a provider's in-memory cache from the persisted store."""
+    slot = fetch_cache.get(provider.cache_key)
+    if not slot or not slot.get("data"):
+        return
+    try:
+        provider.hydrate_cache(
+            slot["data"],
+            datetime.fromtimestamp(slot["fetched_at"], tz=timezone.utc),
+        )
+    except Exception as err:  # noqa: BLE001 -- corrupt slot, just skip it
+        _LOGGER.debug("Ignoring corrupt fetch-cache slot %s: %s", provider.cache_key, err)
+
+
+def _ttl_for_entry(data, options, provider_type: str) -> timedelta:
+    minutes = options.get(
+        CONF_CACHE_TTL_MINUTES,
+        data.get(CONF_CACHE_TTL_MINUTES, DEFAULT_CACHE_TTL_MINUTES.get(provider_type, 60)),
+    )
+    return timedelta(minutes=minutes)
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
@@ -35,6 +85,19 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         return
     provider_type = provider_key.lower()
     disabled_attrs = options.get(CONF_DISABLED_ATTRIBUTES, data.get(CONF_DISABLED_ATTRIBUTES, []))
+    ttl = _ttl_for_entry(data, options, provider_type)
+
+    # Shared per-entry fetch cache ({cache_key: {data, fetched_at}}),
+    # hydrated from .storage so sensors have data right after a restart.
+    fetch_cache = await _load_fetch_cache(hass)
+    hass.data[DOMAIN].setdefault("fetch_cache", {})[config_entry.entry_id] = fetch_cache
+
+    # {device_key: {"name": ..., "sensors": [...]}} -- consumed by button.py
+    # to build one manual-refresh button per device.
+    by_device: dict = {}
+
+    def _register(device_key: str, device_name: str, sensor: "SmartFuelSensor") -> None:
+        by_device.setdefault(device_key, {"name": device_name, "sensors": []})["sensors"].append(sensor)
 
     if provider_type == "gasbuddy_ca":
         station_ids = [s.strip() for s in data.get(CONF_STATION_IDS, "").split(",") if s.strip()]
@@ -47,22 +110,32 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             device_station_name = None
             for grade in fuel_grades:
                 provider = GasBuddyStationProvider(station_id, grade)
-                preview = await hass.async_add_executor_job(provider.fetch_data)
+                provider.cache_ttl = ttl
+                _hydrate_provider(provider, fetch_cache)
+                # get_data() (not fetch_data()) so this warms the cache --
+                # the first scheduled update then reuses it instead of
+                # fetching twice.
+                preview = await hass.async_add_executor_job(provider.get_data)
                 if device_city is None:
                     device_city = preview.get("city") or station_id
                     device_station_name = preview.get("station_name") or f"Station {station_id}"
 
-                entities.append(
-                    SmartFuelSensor(
-                        f"Smart Fuel Price - {device_city} - GasBuddy ({device_station_name})",
-                        provider,
-                        disabled_attrs,
-                        device_key,
-                        unique_suffix=grade,
-                        suggested_area=device_city,
-                    )
+                device_name = (
+                    f"Smart Fuel Price - {device_city} - GasBuddy ({device_station_name})"
                 )
+                sensor = SmartFuelSensor(
+                    device_name,
+                    provider,
+                    disabled_attrs,
+                    device_key,
+                    fetch_cache,
+                    unique_suffix=grade,
+                    suggested_area=device_city,
+                )
+                entities.append(sensor)
+                _register(device_key, device_name, sensor)
         async_add_entities(entities, True)
+        hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
         return
 
     city = data.get(CONF_CITY)
@@ -80,12 +153,17 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         provider = CityNewsCaProvider(city)
     else:
         provider = AffordableEnergyCaProvider(city)
+    provider.cache_ttl = ttl
+    _hydrate_provider(provider, fetch_cache)
 
     sensor = SmartFuelSensor(
-        name, provider, disabled_attrs, config_entry.entry_id,
+        name, provider, disabled_attrs, config_entry.entry_id, fetch_cache,
         suggested_area=city.capitalize(),
     )
+    _register(config_entry.entry_id, name, sensor)
     async_add_entities([sensor], True)
+    hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
+
 
 class SmartFuelSensor(SensorEntity):
     """Representation of a Smart Fuel Price Sensor."""
@@ -93,10 +171,11 @@ class SmartFuelSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(self, device_name, provider, disabled_attributes, device_key, unique_suffix=None, suggested_area=None):
+    def __init__(self, device_name, provider, disabled_attributes, device_key,
+                 fetch_cache, unique_suffix=None, suggested_area=None):
         self._provider = provider
         self._disabled_attributes = disabled_attributes
-        self._last_fetch_time = None
+        self._fetch_cache = fetch_cache
 
         self._attr_name = self._provider.sensor_name
         self._attr_native_unit_of_measurement = self._provider.native_unit_of_measurement
@@ -131,22 +210,31 @@ class SmartFuelSensor(SensorEntity):
         }
 
     async def async_update(self):
-        """Fetch data, throttled per-provider (see BaseFuelPriceProvider.scan_interval)."""
-        now = dt_util.utcnow()
-        if (
-            self._last_fetch_time is not None
-            and now - self._last_fetch_time < self._provider.scan_interval
-        ):
-            return  # Too soon for this provider -- keep the previous state.
+        """Periodic poll -- the provider's TTL cache decides whether the
+        network is actually hit."""
+        await self._async_fetch(force=False)
 
+    async def async_force_refresh(self):
+        """Manual refresh (button entity): bypass the cache and fetch now."""
+        await self._async_fetch(force=True)
+
+    async def _async_fetch(self, force: bool) -> None:
         try:
-            _LOGGER.debug("Updating fuel price sensor via %s for city %s", self._provider.name, self._provider.city)
-            data = await self.hass.async_add_executor_job(self._provider.fetch_data)
-            self._last_fetch_time = now
+            _LOGGER.debug(
+                "Updating fuel price sensor via %s for city %s (force=%s)",
+                self._provider.name, self._provider.city, force,
+            )
+            data = await self.hass.async_add_executor_job(self._provider.get_data, force)
 
             if data:
                 self._state = data.get("state")
                 self._attributes = data
+                if not data.get("from_cache") and data.get("is_valid"):
+                    self._fetch_cache[self._provider.cache_key] = {
+                        "data": data,
+                        "fetched_at": datetime.now(timezone.utc).timestamp(),
+                    }
+                    await _save_fetch_cache(self.hass, self._fetch_cache)
             else:
                 _LOGGER.warning("Received empty data payload from provider: %s", self._provider.name)
 
