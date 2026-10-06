@@ -156,12 +156,29 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     provider.cache_ttl = ttl
     _hydrate_provider(provider, fetch_cache)
 
-    sensor = SmartFuelSensor(
-        name, provider, disabled_attrs, config_entry.entry_id, fetch_cache,
-        suggested_area=city.capitalize(),
-    )
-    _register(config_entry.entry_id, name, sensor)
-    async_add_entities([sensor], True)
+    # (entity name, payload key, unique-id suffix). Price Change keeps the
+    # historic unique_id so existing dashboards/automations don't break.
+    if provider_type == "affordableenergy_ca":
+        specs = [
+            (None, "state", None),  # "Price Change" (legacy)
+            ("Today's Price", "current_price", "today"),
+            ("Tomorrow's Forecast", "tomorrow_price", "tomorrow"),
+        ]
+    else:
+        specs = [(None, "state", None)]
+
+    sensors = []
+    for entity_name, value_key, suffix in specs:
+        sensor = SmartFuelSensor(
+            name, provider, disabled_attrs, config_entry.entry_id, fetch_cache,
+            suggested_area=city.capitalize(),
+            unique_suffix=suffix,
+            entity_name=entity_name,
+            value_key=value_key,
+        )
+        sensors.append(sensor)
+        _register(config_entry.entry_id, name, sensor)
+    async_add_entities(sensors, True)
     hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
 
 
@@ -172,12 +189,15 @@ class SmartFuelSensor(SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, device_name, provider, disabled_attributes, device_key,
-                 fetch_cache, unique_suffix=None, suggested_area=None):
+                 fetch_cache, unique_suffix=None, suggested_area=None,
+                 entity_name=None, value_key="state"):
         self._provider = provider
         self._disabled_attributes = disabled_attributes
         self._fetch_cache = fetch_cache
+        # Which key of the provider payload drives this entity's state.
+        self._value_key = value_key
 
-        self._attr_name = self._provider.sensor_name
+        self._attr_name = entity_name or self._provider.sensor_name
         self._attr_native_unit_of_measurement = self._provider.native_unit_of_measurement
         self._attr_icon = "mdi:gas-station"
         self._attr_unique_id = (
@@ -227,7 +247,7 @@ class SmartFuelSensor(SensorEntity):
             data = await self.hass.async_add_executor_job(self._provider.get_data, force)
 
             if data:
-                self._state = data.get("state")
+                self._state = data.get(self._value_key)
                 self._attributes = data
                 if not data.get("from_cache") and data.get("is_valid"):
                     self._fetch_cache[self._provider.cache_key] = {
