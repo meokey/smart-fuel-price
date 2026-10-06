@@ -74,6 +74,9 @@ To customize which attributes are sent to your database:
 | `citynews_ca` | Canada Major Cities | `toronto`, `ottawa`, `kitchener` (`calgary` currently unsupported -- see below) |
 | `gasbuddy_ca` | Any station, anywhere GasBuddy has data (GTA included) | N/A -- configured by station ID, not a fixed city list; see [GasBuddy section](#gasbuddy-per-station) below |
 
+> **Note:** Gas Wizard publishes tomorrow's forecast on its own schedule (usually by the evening).
+> Until then, its sensors show *unknown* rather than a stale value.
+
 ---
 
 ## Sensor Naming & Organization
