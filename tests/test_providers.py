@@ -190,6 +190,10 @@ def test_gaswizard_forecast_not_published_yet(caplog):
 
     assert data["is_valid"] is False
     assert data["state"] is None
+    assert data["tomorrow_price"] is None
+    # Today's price is known even without a forecast -- it powers the
+    # "Today's Price" entity.
+    assert data["current_price"] == pytest.approx(187.9)
     # This is a routine transient state, not an error: it must not log at
     # WARNING or above (HA surfaces those in the error-log UI).
     import logging
@@ -435,3 +439,20 @@ def test_hydrate_cache_serves_without_network():
     data = provider.get_data()
     assert data["from_cache"] is True
     assert data["state"] == 1.5
+
+
+def test_gaswizard_matches_entries_by_date_not_position():
+    # Even if the page listed entries out of order, today/tomorrow must be
+    # picked by their calendar date.
+    html = _gaswizard_html(
+        (_TODAY, "187.9", " ---"),
+        (_TODAY + timedelta(days=1), "188.9",
+         '<div class="price-direction pd-up"><span class="price-text">+1&#162;</span></div>'),
+    )
+    session = FakeSession({"https://www.gaswizard.ca/toronto": html})
+    data = AffordableEnergyCaProvider("toronto", session=session).fetch_data()
+
+    assert data["is_valid"] is True
+    assert data["current_price"] == pytest.approx(187.9)
+    assert data["tomorrow_price"] == pytest.approx(188.9)
+    assert data["state"] == pytest.approx(1.0)
