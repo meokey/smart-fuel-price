@@ -37,7 +37,7 @@ jobs:
       - name: Archive custom_components
         run: |
           cd custom_components/smart_fuel_price
-          zip -r ../../smart_fuel_price.zip . -x "brand/*"
+          zip -r ../../smart_fuel_price.zip .
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v3
         with:
