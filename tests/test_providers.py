@@ -176,7 +176,7 @@ def test_gaswizard_no_change_day_still_parses():
     assert _fmt_date(_TODAY + timedelta(days=1)) in data["effective_date_str"]
 
 
-def test_gaswizard_forecast_not_published_yet():
+def test_gaswizard_forecast_not_published_yet(caplog):
     # Regression test: when the site's newest entry is *today* (tomorrow's
     # forecast not published yet), the provider must report invalid instead
     # of silently passing off today-vs-yesterday as the forecast change.
@@ -190,6 +190,14 @@ def test_gaswizard_forecast_not_published_yet():
 
     assert data["is_valid"] is False
     assert data["state"] is None
+    # This is a routine transient state, not an error: it must not log at
+    # WARNING or above (HA surfaces those in the error-log UI).
+    import logging
+    assert not [
+        r for r in caplog.records
+        if r.name == "sfp_providers.affordableenergy_ca"
+        and r.levelno >= logging.WARNING
+    ]
 
 GASBUDDY_STATION_JSON = {
     "station": {
