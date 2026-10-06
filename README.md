@@ -64,6 +64,18 @@ To customize which attributes are sent to your database:
 3. Click **Configure** (the gear icon).
 4. Check the attributes you wish to **disable** and click **Submit**.
 
+### Gas Wizard entities
+
+A Gas Wizard entry creates three sensor entities on one device:
+
+- **Price Change** -- tomorrow's forecast minus today's price (in ¢/L).
+- **Today's Price** -- today's known average price. Reported whenever the
+  site lists today, even while tomorrow's forecast isn't published yet.
+- **Tomorrow's Forecast** -- the predicted average price; its
+  `effective_date_str` attribute names the exact forecast date
+  (e.g. "Wednesday Oct 7, 2026"). Shows `unknown` until the site publishes
+  the forecast (usually by the evening).
+
 ### Data caching & refresh threshold
 
 Each entry keeps a local cache of the last fetched data plus its timestamp
