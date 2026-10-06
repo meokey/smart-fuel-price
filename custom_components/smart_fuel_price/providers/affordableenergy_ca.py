@@ -28,13 +28,19 @@ Design notes:
     trend comes from comparing the two prices.
   * Order verified 2026-09-27 (8:53 pm): entry[0] = Monday Sep 28
     (tomorrow's prediction); entry[1] = Sunday Sep 27, whose price equals
-    the page's own "Current Average Price". So entry[1] -> current_price; 
+    the page's own "Current Average Price". So entry[1] -> current_price;
     state is their difference.
+  * 2026-10-06: the site sometimes hasn't published tomorrow's prediction
+    yet -- then entry[0] is *today*, not tomorrow. The entry date is now
+    verified against tomorrow (America/Toronto); if it doesn't match, the
+    forecast is reported invalid instead of a misleading 0.0 change.
 """
 
 import logging
 import re
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .base import BaseFuelPriceProvider, trend_fields
 
@@ -82,6 +88,20 @@ def _extract_entries(page_html: str) -> list[re.Match[str]]:
     return entries
 
 
+# Gas Wizard publishes on a Toronto schedule; the forecast contract is
+# anchored to America/Toronto regardless of the HA host's timezone.
+_SITE_TZ = ZoneInfo("America/Toronto")
+
+
+def _parse_entry_date(date_str: str) -> "datetime.date":
+    """Parse a '<span class="datetext">' value like 'Oct 6, 2026'."""
+    return datetime.strptime(date_str.strip(), "%b %d, %Y").date()
+
+
+def _tomorrow_in_site_tz() -> "datetime.date":
+    return (datetime.now(_SITE_TZ) + timedelta(days=1)).date()
+
+
 class AffordableEnergyCaProvider(BaseFuelPriceProvider):
     """Provider for Gas Wizard (gaswizard.ca)."""
 
@@ -119,7 +139,30 @@ class AffordableEnergyCaProvider(BaseFuelPriceProvider):
             )
             return {"city": slug, "is_valid": False}
 
-        latest, prior = entries[0], entries[1]
+        latest = entries[0]
+        try:
+            latest_date = _parse_entry_date(latest.group("date"))
+        except ValueError:
+            _LOGGER.warning(
+                "[%s] Could not parse entry date %r for '%s' -- page layout "
+                "may have changed.",
+                self.name,
+                latest.group("date"),
+                slug,
+            )
+            return {"city": slug, "is_valid": False}
+
+        if latest_date != _tomorrow_in_site_tz():
+            _LOGGER.warning(
+                "[%s] Newest entry for '%s' is dated %s, not tomorrow -- "
+                "tomorrow's forecast is not published yet.",
+                self.name,
+                slug,
+                latest_date.isoformat(),
+            )
+            return {"city": slug, "is_valid": False}
+
+        prior = entries[1]
         tomorrow_cents = float(latest.group("price"))
         current_cents = float(prior.group("price"))
         change_cents = round(tomorrow_cents - current_cents, 1)
