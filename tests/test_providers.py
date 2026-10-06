@@ -34,20 +34,52 @@ class FakeSession:
             return FakeResponse(self.pages[url])
         return FakeResponse("", status_code=404)
 
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
-# Minimal fixture modelled on the live gaswizard.ca/toronto markup.
-GASWIZARD_TORONTO_HTML = """
-<ul class="single-city-prices "><h2 class="entry-title">Toronto</h2>
-<li><div><span class="daytext">Saturday</span> - <span class="datetext">Sep 26, 2026</span></div>
-<div class="fueltype"><div class="fueltitle">Regular</div>
-<div class="fuelprice"><span class="fuel-price-value">188.9</span>
-<div class="price-direction pd-up"><span class="price-text">+1&#162;</span></div></div></div></li>
-<li><div><span class="daytext">Friday</span> - <span class="datetext">Sep 25, 2026</span></div>
-<div class="fueltype"><div class="fueltitle">Regular</div>
-<div class="fuelprice"><span class="fuel-price-value">187.9</span>
-<div class="price-direction pd-up"><span class="price-text">+2&#162;</span></div></div></div></li>
-</ul>
-"""
+_EASTERN = ZoneInfo("America/Toronto")
+
+
+def _eastern_today():
+    return datetime.now(_EASTERN).date()
+
+
+def _fmt_date(d):
+    # "Oct 6, 2026" -- no zero-padding so it matches the site's format
+    return d.strftime("%b") + " " + str(d.day) + ", " + str(d.year)
+
+
+def _gaswizard_html(first, second):
+    """Build a minimal gaswizard.ca/toronto-style fixture.
+
+    first/second are (date, price, change_markup) tuples in page order.
+    """
+    items = []
+    for d, price, extra in (first, second):
+        items.append(
+            '<li><div><span class="daytext">' + d.strftime("%A") + "</span> - "
+            '<span class="datetext">' + _fmt_date(d) + "</span></div>"
+            '<div class="fueltype"><div class="fueltitle">Regular</div>'
+            '<div class="fuelprice"><span class="fuel-price-value">' + price + "</span>"
+            + extra + "</div></div></li>"
+        )
+    return (
+        '<ul class="single-city-prices "><h2 class="entry-title">Toronto</h2>'
+        + "".join(items)
+        + "</ul>"
+    )
+
+
+# Fixture modelled on the live gaswizard.ca/toronto markup. Dates are dynamic:
+# the provider only trusts entries[0] when it is dated *tomorrow*.
+_TODAY = _eastern_today()
+GASWIZARD_TORONTO_HTML = _gaswizard_html(
+    (_TODAY + timedelta(days=1), "188.9",
+     '<div class="price-direction pd-up"><span class="price-text">+1&#162;</span></div>'),
+    (_TODAY, "187.9",
+     '<div class="price-direction pd-up"><span class="price-text">+2&#162;</span></div>'),
+)
+
 
 CITYNEWS_TORONTO_HTML = (
     '<a href="http://www.en-pro.com/">En-Pro</a> tells CityNews that prices '
@@ -124,18 +156,13 @@ def test_citynews_calgary_parked_fails_soft():
     assert data["is_valid"] is False
 
 
-GASWIZARD_NO_CHANGE_HTML = """
-<ul class="single-city-prices "><h2 class="entry-title">Toronto</h2>
-<li><div><span class="daytext">Monday</span> - <span class="datetext">Sep 28, 2026</span></div>
-<div class="fueltype"><div class="fueltitle">Regular</div>
-<div class="fuelprice"><span class="fuel-price-value">181.9</span> ---</div></div></li>
-<li><div><span class="daytext">Sunday</span> - <span class="datetext">Sep 27, 2026</span></div>
-<div class="fueltype"><div class="fueltitle">Regular</div>
-<div class="fuelprice"><span class="fuel-price-value">181.9</span>
-<div class="price-direction pd-down"><span class="price-text">-7&#162;</span></div></div></div></li>
-<li><h3>Current Average Price</h3>$1.819</li>
-</ul>
-"""
+GASWIZARD_NO_CHANGE_HTML = _gaswizard_html(
+    (_TODAY + timedelta(days=1), "181.9", " ---"),
+    (_TODAY, "181.9",
+     '<div class="price-direction pd-down"><span class="price-text">-7&#162;</span></div>'),
+)
+
+
 
 def test_gaswizard_no_change_day_still_parses():
     session = FakeSession({"https://www.gaswizard.ca/toronto": GASWIZARD_NO_CHANGE_HTML})
@@ -146,7 +173,23 @@ def test_gaswizard_no_change_day_still_parses():
     assert data["tomorrow_price"] == pytest.approx(181.9)
     assert data["current_price"] == pytest.approx(181.9)
     assert data["trend"] == "stable"
-    assert "Sep 28, 2026" in data["effective_date_str"]
+    assert _fmt_date(_TODAY + timedelta(days=1)) in data["effective_date_str"]
+
+
+def test_gaswizard_forecast_not_published_yet():
+    # Regression test: when the site's newest entry is *today* (tomorrow's
+    # forecast not published yet), the provider must report invalid instead
+    # of silently passing off today-vs-yesterday as the forecast change.
+    html = _gaswizard_html(
+        (_TODAY, "187.9", " ---"),
+        (_TODAY - timedelta(days=1), "187.9",
+         '<div class="price-direction pd-up"><span class="price-text">+2&#162;</span></div>'),
+    )
+    session = FakeSession({"https://www.gaswizard.ca/toronto": html})
+    data = AffordableEnergyCaProvider("toronto", session=session).fetch_data()
+
+    assert data["is_valid"] is False
+    assert data["state"] is None
 
 GASBUDDY_STATION_JSON = {
     "station": {
