@@ -32,10 +32,11 @@
   "options": {
     "step": {
       "init": {
-        "title": "Attribute Filtering",
-        "description": "Select the attributes you want to DISABLE. Checked attributes will NOT be written to the Home Assistant database.",
+        "title": "Attributes & Caching",
+        "description": "Select the attributes you want to DISABLE. Checked attributes will NOT be written to the Home Assistant database. The cache threshold controls how long fetched data is reused before the integration hits the network again.",
         "data": {
-          "disabled_attributes": "Attributes to Disable"
+          "disabled_attributes": "Attributes to Disable",
+          "cache_ttl_minutes": "Cache threshold (minutes)"
         }
       }
     }
