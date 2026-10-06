@@ -34,6 +34,9 @@ Design notes:
     yet -- then entry[0] is *today*, not tomorrow. The entry date is now
     verified against tomorrow (America/Toronto); if it doesn't match, the
     forecast is reported invalid instead of a misleading 0.0 change.
+  * 2026-10-06: entries are now matched by calendar date, not page position,
+    and today's price is always reported when the site lists today -- even
+    while tomorrow's forecast is still missing.
 """
 
 import logging
@@ -102,6 +105,10 @@ def _tomorrow_in_site_tz() -> "datetime.date":
     return (datetime.now(_SITE_TZ) + timedelta(days=1)).date()
 
 
+def _today_in_site_tz() -> "datetime.date":
+    return datetime.now(_SITE_TZ).date()
+
+
 class AffordableEnergyCaProvider(BaseFuelPriceProvider):
     """Provider for Gas Wizard (gaswizard.ca)."""
 
@@ -129,54 +136,76 @@ class AffordableEnergyCaProvider(BaseFuelPriceProvider):
         page_html = self._get(url).text
 
         entries = _extract_entries(page_html)
-        if len(entries) < 2:
+        if not entries:
             _LOGGER.warning(
-                "[%s] Found %d dated 'Regular' price entries for '%s' (need at "
-                "least 2) -- page layout may have changed.",
+                "[%s] Found no dated 'Regular' price entries for '%s' -- "
+                "page layout may have changed.",
                 self.name,
-                len(entries),
                 slug,
             )
             return {"city": slug, "is_valid": False}
 
-        latest = entries[0]
-        try:
-            latest_date = _parse_entry_date(latest.group("date"))
-        except ValueError:
-            _LOGGER.warning(
-                "[%s] Could not parse entry date %r for '%s' -- page layout "
-                "may have changed.",
-                self.name,
-                latest.group("date"),
-                slug,
-            )
-            return {"city": slug, "is_valid": False}
+        # Match entries by calendar date, not page position: the site lists
+        # only 2 entries and the newest is not always tomorrow's forecast
+        # (it isn't published yet for much of the day).
+        dated: list[tuple[datetime.date, re.Match]] = []
+        for entry in entries:
+            try:
+                dated.append((_parse_entry_date(entry.group("date")), entry))
+            except ValueError:
+                _LOGGER.warning(
+                    "[%s] Could not parse entry date %r for '%s' -- page layout "
+                    "may have changed.",
+                    self.name,
+                    entry.group("date"),
+                    slug,
+                )
 
-        if latest_date != _tomorrow_in_site_tz():
+        today = _today_in_site_tz()
+        tomorrow = _tomorrow_in_site_tz()
+        today_entry = next((e for d, e in dated if d == today), None)
+        tomorrow_entry = next((e for d, e in dated if d == tomorrow), None)
+
+        # Today's price is known whenever the site lists today -- even while
+        # tomorrow's forecast is still missing.
+        current_cents = float(today_entry.group("price")) if today_entry else None
+
+        if tomorrow_entry is None:
             # Routine, expected transient state: Gas Wizard publishes
             # tomorrow's forecast on its own schedule (usually by the
             # evening). Info-level only -- a warning here would surface as
             # an error in the HA log UI and needlessly alarm the user.
-            # The sensor already reports unknown in this case.
+            # The forecast sensors report unknown; today's price is still
+            # reported since it is known.
+            newest = dated[0][0].isoformat() if dated else "none"
             _LOGGER.info(
-                "[%s] Newest entry for '%s' is dated %s, not tomorrow -- "
-                "tomorrow's forecast is not published yet.",
+                "[%s] No entry dated %s for '%s' (newest is %s) -- tomorrow's "
+                "forecast is not published yet.",
                 self.name,
+                tomorrow.isoformat(),
                 slug,
-                latest_date.isoformat(),
+                newest,
             )
-            return {"city": slug, "is_valid": False}
+            return {
+                "city": slug,
+                "is_valid": False,
+                "state": None,
+                "tomorrow_price": None,
+                "current_price": current_cents,
+            }
 
-        prior = entries[1]
-        tomorrow_cents = float(latest.group("price"))
-        current_cents = float(prior.group("price"))
-        change_cents = round(tomorrow_cents - current_cents, 1)
+        tomorrow_cents = float(tomorrow_entry.group("price"))
+        change_cents = (
+            round(tomorrow_cents - current_cents, 1)
+            if current_cents is not None
+            else None
+        )
 
         return {
             "state": change_cents,
             "tomorrow_price": tomorrow_cents,
             "current_price": current_cents,
-            "effective_date_str": f"{latest.group('day').strip()} {latest.group('date').strip()}",
+            "effective_date_str": f"{tomorrow_entry.group('day').strip()} {tomorrow_entry.group('date').strip()}",
             "is_valid": True,
             "city": slug,
             **trend_fields(change_cents),
