@@ -16,7 +16,7 @@ from .const import DOMAIN, CONF_PROVIDER, CONF_CITY, CONF_DISABLED_ATTRIBUTES
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
 
 # Legacy YAML entries must be a list of dicts. Coerce a lone dict-style
 # block into a single-entry list so async_setup's iteration below never
@@ -76,7 +76,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        # Drop per-entry runtime state owned by the sensor/button platforms.
+        hass.data[DOMAIN].get("sensors", {}).pop(entry.entry_id, None)
+        hass.data[DOMAIN].get("fetch_cache", {}).pop(entry.entry_id, None)
     return unload_ok
 
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry):
