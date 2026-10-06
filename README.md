@@ -120,6 +120,19 @@ were unaffected -- their `state` has always been the current price in $.
 Check any automations that read a forecast-provider sensor's state
 directly.
 
+## Development
+
+### Running tests
+
+```bash
+pip install -r requirements-test.txt
+pytest            # offline tests (default)
+pytest -m live    # live smoke tests against real provider sites
+```
+
+`pytest.ini` excludes live tests by default; known-failing live checks are
+marked `xfail` rather than skipped.
+
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
