@@ -153,7 +153,12 @@ class AffordableEnergyCaProvider(BaseFuelPriceProvider):
             return {"city": slug, "is_valid": False}
 
         if latest_date != _tomorrow_in_site_tz():
-            _LOGGER.warning(
+            # Routine, expected transient state: Gas Wizard publishes
+            # tomorrow's forecast on its own schedule (usually by the
+            # evening). Info-level only -- a warning here would surface as
+            # an error in the HA log UI and needlessly alarm the user.
+            # The sensor already reports unknown in this case.
+            _LOGGER.info(
                 "[%s] Newest entry for '%s' is dated %s, not tomorrow -- "
                 "tomorrow's forecast is not published yet.",
                 self.name,
