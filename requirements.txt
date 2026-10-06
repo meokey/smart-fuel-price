@@ -1,0 +1,4 @@
+# CI pip-cache key for actions/setup-python (it looks for requirements.txt
+# or pyproject.toml by default). Actual pinned test dependencies live in
+# requirements-test.txt.
+-r requirements-test.txt
