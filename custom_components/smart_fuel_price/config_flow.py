@@ -9,6 +9,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers import selector
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -18,6 +19,8 @@ from .const import (
     CONF_STATION_IDS,
     CONF_FUEL_GRADES,
     CONF_DISABLED_ATTRIBUTES,
+    CONF_CACHE_TTL_MINUTES,
+    DEFAULT_CACHE_TTL_MINUTES,
     AVAILABLE_PROVIDERS,
     GASBUDDY_FUEL_GRADES,
     OPTIONAL_ATTRIBUTES,
@@ -207,10 +210,26 @@ class SmartFuelPriceOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_DISABLED_ATTRIBUTES,
             self.config_entry.data.get(CONF_DISABLED_ATTRIBUTES, [])
         )
+        provider_key = (self.config_entry.data.get(CONF_PROVIDER) or "").lower()
+        current_ttl = self.config_entry.options.get(
+            CONF_CACHE_TTL_MINUTES,
+            self.config_entry.data.get(
+                CONF_CACHE_TTL_MINUTES,
+                DEFAULT_CACHE_TTL_MINUTES.get(provider_key, 60),
+            ),
+        )
         schema = vol.Schema({
             vol.Optional(
                 CONF_DISABLED_ATTRIBUTES,
                 default=current_disabled
-            ): cv.multi_select(OPTIONAL_ATTRIBUTES)
+            ): cv.multi_select(OPTIONAL_ATTRIBUTES),
+            vol.Optional(
+                CONF_CACHE_TTL_MINUTES,
+                default=current_ttl,
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=5, max=1440, step=5, unit_of_measurement="min"
+                )
+            ),
         })
         return self.async_show_form(step_id="init", data_schema=schema)

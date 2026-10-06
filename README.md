@@ -64,6 +64,26 @@ To customize which attributes are sent to your database:
 3. Click **Configure** (the gear icon).
 4. Check the attributes you wish to **disable** and click **Submit**.
 
+### Data caching & refresh threshold
+
+Each entry keeps a local cache of the last fetched data plus its timestamp
+(persisted in `.storage`, so it survives restarts). The same Options screen
+lets you set a **cache threshold** per entry:
+
+- If the last fetch is *newer* than the threshold, the sensor reuses the
+  cached data without hitting the network.
+- Presets: **240 min** for forecast providers (Gas Wizard, CityNews),
+  **30 min** for GasBuddy. Adjustable from 5 to 1440 minutes.
+
+When a fetch fails but cached data exists, live-price providers (GasBuddy)
+keep showing the last known value marked with a `stale: True` attribute
+instead of going `unknown` -- useful during rate-limiting episodes.
+Forecast providers never serve stale forecasts; they show `unknown` until
+fresh data arrives.
+
+Each device also gets a **Refresh data** button entity for a manual,
+cache-bypassing fetch at any time.
+
 ---
 
 ## Supported Providers & Cities

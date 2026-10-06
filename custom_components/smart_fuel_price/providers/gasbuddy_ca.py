@@ -109,6 +109,14 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
     _station_cache: dict[str, tuple[float, dict]] = {}
     _CACHE_TTL_SECONDS = 20 * 60  # a bit under the 30-min scan_interval
 
+    # Live per-station prices: serving the last known price on a failed
+    # fetch (rate-limit etc.) beats showing unknown.
+    allow_stale_on_failure = True
+
+    @property
+    def cache_key(self) -> str:
+        return f"gasbuddy:{self.station_id}:{self.fuel_grade}"
+
     def __init__(self, station_id: str, fuel_grade: str = "regular", **kwargs: Any) -> None:
         super().__init__(city=str(station_id), **kwargs)
         self.fuel_grade = fuel_grade.lower()
@@ -166,7 +174,9 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
         )
 
         if response.status_code in (403, 429):
-            _LOGGER.warning(
+            # Handled transient: get_data() falls back to the cached price
+            # when one exists, so info-level only.
+            _LOGGER.info(
                 "[%s] Station '%s' got HTTP %s from GasBuddy -- this looks "
                 "like rate-limiting or temporary bot-protection, not a real "
                 "data problem. Will try again on the next scheduled poll.",

@@ -34,7 +34,7 @@ class FakeSession:
             return FakeResponse(self.pages[url])
         return FakeResponse("", status_code=404)
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 _EASTERN = ZoneInfo("America/Toronto")
@@ -324,3 +324,114 @@ def test_city_lists_are_well_formed():
         assert cities, f"{provider_cls.__name__} returned an empty city list"
         assert len(cities) == len(set(cities)), f"{provider_cls.__name__} has duplicate cities"
         assert all(c == c.lower() for c in cities), f"{provider_cls.__name__} has non-lowercase city slugs"
+
+
+# ---------------------------------------------------------------------------
+# Fetch-cache (provider.get_data) tests -- all offline via injected sessions.
+# ---------------------------------------------------------------------------
+
+def _valid_gaswizard_provider(session=None):
+    session = session or FakeSession(
+        {"https://www.gaswizard.ca/toronto": GASWIZARD_TORONTO_HTML}
+    )
+    provider = AffordableEnergyCaProvider("toronto", session=session)
+    provider.cache_ttl = timedelta(minutes=60)
+    return provider, session
+
+
+def test_get_data_caches_within_ttl():
+    provider, session = _valid_gaswizard_provider()
+    first = provider.get_data()
+    assert first["is_valid"] is True
+    assert first["from_cache"] is False
+
+    second = provider.get_data()
+    assert second["is_valid"] is True
+    assert second["from_cache"] is True
+    assert len(session.requested) == 1  # second call hit no network
+
+
+def test_get_data_refetches_after_ttl():
+    provider, session = _valid_gaswizard_provider()
+    provider.get_data()
+    # Pretend the last attempt was 2h ago.
+    provider._last_attempt_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    data = provider.get_data()
+    assert data["from_cache"] is False
+    assert len(session.requested) == 2
+
+
+def test_get_data_force_refresh_bypasses_cache():
+    provider, session = _valid_gaswizard_provider()
+    provider.get_data()
+    data = provider.get_data(force_refresh=True)
+    assert data["from_cache"] is False
+    assert len(session.requested) == 2
+
+
+def test_get_data_failed_fetch_without_cache_returns_invalid():
+    class _FailSession(FakeSession):
+        def get(self, url, **kwargs):
+            self.requested.append(url)
+            return FakeResponse("", status_code=500)
+
+    provider = AffordableEnergyCaProvider("toronto", session=_FailSession({}))
+    provider.cache_ttl = timedelta(minutes=60)
+    data = provider.get_data()
+    assert data["is_valid"] is False
+    assert "stale" not in data
+
+
+def test_gaswizard_does_not_serve_stale_forecast():
+    # Warm the cache with a valid forecast, then the site stops publishing
+    # tomorrow's entry: must stay invalid/unknown, never a stale forecast.
+    provider, _ = _valid_gaswizard_provider()
+    assert provider.get_data()["is_valid"] is True
+
+    today_only = _gaswizard_html(
+        (_TODAY, "187.9", " ---"),
+        (_TODAY - timedelta(days=1), "187.9", " ---"),
+    )
+    provider._session = FakeSession({"https://www.gaswizard.ca/toronto": today_only})
+    provider._last_attempt_at = None  # force a real refetch
+    data = provider.get_data()
+    assert data["is_valid"] is False
+    assert "stale" not in data
+
+
+def test_gasbuddy_serves_stale_price_on_rate_limit():
+    session = FakePostSession(GASBUDDY_STATION_JSON)
+    provider = GasBuddyStationProvider("205748", "regular", session=session)
+    provider.cache_ttl = timedelta(minutes=30)
+    first = provider.get_data()
+    assert first["is_valid"] is True
+    assert first["state"] == pytest.approx(1.649)
+
+    class _RateLimitedSession(FakePostSession):
+        def post(self, url, data=None, **kwargs):
+            self.post_count += 1
+            return FakeResponse("", status_code=429)
+
+    provider._session = _RateLimitedSession({})
+    GasBuddyStationProvider._clear_station_cache()  # force the POST to run
+    provider._last_attempt_at = None
+    second = provider.get_data()
+    assert second["is_valid"] is True
+    assert second["stale"] is True
+    assert second["from_cache"] is True
+    assert second["state"] == pytest.approx(1.649)
+
+
+def test_gasbuddy_cache_key_includes_grade():
+    a = GasBuddyStationProvider("205748", "regular")
+    b = GasBuddyStationProvider("205748", "premium")
+    assert a.cache_key != b.cache_key
+
+
+def test_hydrate_cache_serves_without_network():
+    provider = AffordableEnergyCaProvider("toronto", session=FakeSession({}))
+    provider.cache_ttl = timedelta(minutes=60)
+    provider.hydrate_cache({"is_valid": True, "state": 1.5}, datetime.now(timezone.utc))
+    data = provider.get_data()
+    assert data["from_cache"] is True
+    assert data["state"] == 1.5

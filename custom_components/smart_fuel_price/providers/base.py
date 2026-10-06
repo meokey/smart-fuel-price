@@ -5,7 +5,7 @@ All data source plugins must inherit from this class.
 
 import logging
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -53,6 +53,13 @@ def trend_fields(change_cents: float | None) -> dict[str, Any]:
 class BaseFuelPriceProvider(ABC):
     """Abstract Base Class for Fuel Price Providers with built-in Defensiveness."""
 
+    # When True, a failed fetch falls back to the last cached payload
+    # (marked stale=True) instead of returning invalid/unknown. Only for
+    # providers where slightly old data beats no data -- e.g. live prices
+    # behind rate limits. Forecast providers keep this False: a stale
+    # forecast would be actively misleading.
+    allow_stale_on_failure: bool = False
+
     def __init__(
         self,
         city: str,
@@ -63,6 +70,13 @@ class BaseFuelPriceProvider(ABC):
         self._api_key = api_key
         self._timeout = 10  # Hard 10-second network timeout boundary.
         self._session = session or self._build_session()
+        # Local fetch cache: last payload + when it was fetched.
+        # cache_ttl may be overridden (e.g. from the HA options flow);
+        # None means "fall back to this provider's scan_interval".
+        self.cache_ttl: timedelta | None = None
+        self._cached_data: dict[str, Any] | None = None
+        self._cached_at: datetime | None = None
+        self._last_attempt_at: datetime | None = None
 
     @classmethod
     def _build_session(cls) -> requests.Session:
@@ -169,6 +183,68 @@ class BaseFuelPriceProvider(ABC):
             _LOGGER.error("[%s] Unexpected error during data extraction: %s", self.name, e)
 
         return result
+
+    @property
+    def cache_key(self) -> str:
+        """Stable key identifying this provider's cache slot.
+
+        Used for persisting the fetch cache across restarts. Providers
+        with extra identity dimensions (e.g. GasBuddy's fuel grade)
+        must override this.
+        """
+        return f"{type(self).__name__}:{self._city}"
+
+    def _effective_ttl(self) -> timedelta:
+        return self.cache_ttl if self.cache_ttl is not None else self.scan_interval
+
+    def get_data(self, force_refresh: bool = False) -> dict[str, Any]:
+        """Return fuel data, reusing the local cache when it is fresh.
+
+        - Within TTL of the last attempt (and not forced): return the
+          cached payload with ``from_cache: True`` -- no network call.
+        - Otherwise fetch; on success the cache (data + timestamp) is
+          refreshed.
+        - On a failed fetch with a warm cache: serve the stale payload
+          (``from_cache: True, stale: True``) when
+          ``allow_stale_on_failure`` is set, else the invalid result.
+        """
+        now = datetime.now(timezone.utc)
+        ttl = self._effective_ttl()
+        if (
+            not force_refresh
+            and self._cached_data is not None
+            and self._last_attempt_at is not None
+            and now - self._last_attempt_at < ttl
+        ):
+            cached = dict(self._cached_data)
+            cached["from_cache"] = True
+            return cached
+
+        self._last_attempt_at = now
+        data = self.fetch_data()
+        if data.get("is_valid"):
+            self._cached_data = dict(data)
+            self._cached_at = now
+            data["from_cache"] = False
+            return data
+
+        if self.allow_stale_on_failure and self._cached_data is not None:
+            _LOGGER.info(
+                "[%s] Fetch failed; serving last cached data (stale).", self.name
+            )
+            stale = dict(self._cached_data)
+            stale["from_cache"] = True
+            stale["stale"] = True
+            return stale
+
+        data["from_cache"] = False
+        return data
+
+    def hydrate_cache(self, data: dict[str, Any], fetched_at: datetime) -> None:
+        """Restore a previously persisted cache (e.g. after HA restart)."""
+        self._cached_data = dict(data)
+        self._cached_at = fetched_at
+        self._last_attempt_at = fetched_at
 
     @abstractmethod
     def _parse_data(self) -> dict[str, Any]:
