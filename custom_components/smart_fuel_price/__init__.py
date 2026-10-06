@@ -3,9 +3,13 @@ The Smart Fuel Price integration setup.
 Handles transparent migration from YAML to Config Flow.
 """
 import logging
+
+import voluptuous as vol
+
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.const import CONF_NAME, Platform
+from homeassistant.const import Platform
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, CONF_PROVIDER, CONF_CITY, CONF_DISABLED_ATTRIBUTES
@@ -13,6 +17,28 @@ from .const import DOMAIN, CONF_PROVIDER, CONF_CITY, CONF_DISABLED_ATTRIBUTES
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR]
+
+# Legacy YAML entries must be a list of dicts. Coerce a lone dict-style
+# block into a single-entry list so async_setup's iteration below never
+# yields bare dict keys (which would crash async_step_import on
+# user_input.get).
+CONFIG_SCHEMA = vol.Schema(
+    {
+        DOMAIN: vol.All(
+            cv.ensure_list,
+            [
+                vol.Schema(
+                    {
+                        vol.Required(CONF_PROVIDER): str,
+                        vol.Optional(CONF_CITY): str,
+                    }
+                )
+            ],
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the integration and migrate legacy YAML configuration."""

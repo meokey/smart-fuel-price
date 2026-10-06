@@ -26,7 +26,14 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     options = config_entry.options
 
     name = data.get(CONF_NAME, config_entry.title)
-    provider_type = data.get(CONF_PROVIDER).lower()
+    provider_key = data.get(CONF_PROVIDER)
+    if not provider_key:
+        _LOGGER.error(
+            "Config entry %s has no provider configured; skipping setup",
+            config_entry.entry_id,
+        )
+        return
+    provider_type = provider_key.lower()
     disabled_attrs = options.get(CONF_DISABLED_ATTRIBUTES, data.get(CONF_DISABLED_ATTRIBUTES, []))
 
     if provider_type == "gasbuddy_ca":
@@ -58,7 +65,14 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         async_add_entities(entities, True)
         return
 
-    city = data.get(CONF_CITY).lower()
+    city = data.get(CONF_CITY)
+    if not city:
+        _LOGGER.error(
+            "Config entry %s has no city configured; skipping setup",
+            config_entry.entry_id,
+        )
+        return
+    city = city.lower()
 
     if provider_type == "fuelwise_app":
         provider = FuelwiseAppProvider(city)
@@ -72,7 +86,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         suggested_area=city.capitalize(),
     )
     async_add_entities([sensor], True)
-
 
 class SmartFuelSensor(SensorEntity):
     """Representation of a Smart Fuel Price Sensor."""

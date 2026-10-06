@@ -1,0 +1,5 @@
+# CI test dependencies. Major-version pins: pytest 9 is what CI runs today
+# (fixed in Oct 2026 after the pytest-asyncio/phacc conflict); the <10
+# bound keeps a future major from silently breaking the pipeline.
+pytest>=8,<10
+requests>=2,<3
