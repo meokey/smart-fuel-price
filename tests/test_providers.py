@@ -449,6 +449,24 @@ def test_gasbuddy_cache_key_includes_grade():
     assert a.cache_key != b.cache_key
 
 
+def test_fresh_cache_slot_only_for_real_fetches():
+    """The persist rule shared by setup-preview and sensor updates."""
+    from sfp_providers.base import fresh_cache_slot
+
+    provider = GasBuddyStationProvider("205748", session=FakePostSession(GASBUDDY_STATION_JSON))
+    before = datetime.now(timezone.utc).timestamp()
+    slot = fresh_cache_slot(provider, {"is_valid": True, "state": 164.9})
+    assert slot is not None
+    assert slot["data"] == {"is_valid": True, "state": 164.9}
+    assert before <= slot["fetched_at"] <= datetime.now(timezone.utc).timestamp()
+
+    # TTL-cache hits, invalid payloads and empty data are never persisted.
+    assert fresh_cache_slot(provider, {"is_valid": True, "from_cache": True}) is None
+    assert fresh_cache_slot(provider, {"is_valid": False}) is None
+    assert fresh_cache_slot(provider, None) is None
+    assert fresh_cache_slot(provider, {}) is None
+
+
 def test_last_successful_fetch_tracks_fetches():
     """Drives the per-device "Last updated" timestamp sensor."""
     session = FakePostSession(GASBUDDY_STATION_JSON)
