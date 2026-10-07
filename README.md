@@ -107,6 +107,13 @@ rate-limited, the Update status sensor carries a `suggestion` attribute
 advising you to raise the cache threshold for that entry (Options) -- a
 manual press that hits the limit needs no such hint.
 
+The device info card shows the device type (`Gas station` vs `City fuel
+forecast` / `City fuel price`) and a link to the source page (the GasBuddy
+station page, the Gas Wizard city page, or the CityNews article that last
+parsed), so the numbers can be checked against the source in one tap. The
+station's street address, city and province ride along as attributes on the
+price sensor.
+
 ### Suggested dashboard layout
 
 For a Gas Wizard device, a vertical stack keeps the three related sensors
