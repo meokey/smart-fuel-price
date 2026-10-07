@@ -93,7 +93,7 @@ instead of going `unknown` -- useful during rate-limiting episodes.
 Forecast providers never serve stale forecasts; they show `unknown` until
 fresh data arrives.
 
-Each device also gets a **Refresh data** button entity for a manual,
+Each device also gets a **Manual refresh** button entity for a manual,
 cache-bypassing fetch at any time, and a **Last updated** timestamp sensor
 showing when the device's data was last successfully fetched -- covering
 both automatic polls and manual refreshes. (The button's own timestamp only
@@ -115,7 +115,7 @@ cards:
       - sensor.smart_fuel_price_toronto_gas_wizard
   - type: button
     entity: button.smart_fuel_price_toronto_gas_wizard_refresh_data
-    name: Refresh data
+    name: Manual refresh
 ```
 
 (Adjust the entity IDs to match your own device/city.)

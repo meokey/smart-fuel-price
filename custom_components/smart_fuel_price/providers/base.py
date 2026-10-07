@@ -14,6 +14,23 @@ import requests
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def fresh_cache_slot(provider: "BaseFuelPriceProvider", data: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Build the persisted-cache slot for a fresh, valid fetch.
+
+    Returns ``{"data": ..., "fetched_at": ...}`` when *data* came from a
+    real network fetch (not the TTL cache) and is valid, else None.
+    Shared by the setup-time preview persist and the sensor update path so
+    the "what counts as a persistable fetch" rule lives in one place --
+    and so the "Last updated" timestamp survives restarts faithfully.
+    """
+    if data and not data.get("from_cache") and data.get("is_valid"):
+        return {
+            "data": data,
+            "fetched_at": datetime.now(timezone.utc).timestamp(),
+        }
+    return None
+
 # Several target sites (and third-party widgets embedded on them) block or
 # mis-serve requests carrying the default python-requests User-Agent string.
 DEFAULT_HEADERS = {
