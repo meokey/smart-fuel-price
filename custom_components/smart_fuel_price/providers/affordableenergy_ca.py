@@ -122,6 +122,11 @@ class AffordableEnergyCaProvider(BaseFuelPriceProvider):
     def get_supported_cities(cls) -> list[str]:
         return list(CITY_MAP.keys())
 
+    @property
+    def source_url(self) -> str | None:
+        slug = CITY_MAP.get(self.city, CITY_MAP["toronto"])
+        return f"{self.BASE_URL}/{slug}"
+
     def _parse_data(self) -> dict[str, Any]:
         slug = CITY_MAP.get(self.city)
         if not slug:

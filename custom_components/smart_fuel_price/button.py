@@ -21,6 +21,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         SmartFuelRefreshButton(
             device_key, info["name"], info["sensors"],
             info.get("last_updated"), info.get("update_status"),
+            model=info.get("model"), configuration_url=info.get("configuration_url"),
         )
         for device_key, info in by_device.items()
     ]
@@ -37,7 +38,8 @@ class SmartFuelRefreshButton(ButtonEntity):
     _attr_icon = "mdi:refresh"
 
     def __init__(self, device_key: str, device_name: str, sensors: list,
-                 last_updated=None, update_status=None) -> None:
+                 last_updated=None, update_status=None, model=None,
+                 configuration_url=None) -> None:
         self._sensors = sensors
         self._last_updated = last_updated
         self._update_status = update_status
@@ -46,6 +48,8 @@ class SmartFuelRefreshButton(ButtonEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device_key)},
             name=device_name,
+            model=model,
+            configuration_url=configuration_url,
         )
 
     async def async_press(self) -> None:

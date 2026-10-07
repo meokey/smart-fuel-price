@@ -314,6 +314,14 @@ class BaseFuelPriceProvider(ABC):
         return data
 
     @property
+    def source_url(self) -> str | None:
+        """Canonical web page for this device's data (city page / station
+        page). Shown as a link on the HA device info card so the numbers can
+        be checked against the source. None when the provider has no stable
+        per-device URL."""
+        return None
+
+    @property
     def last_fetch_status(self) -> str | None:
         """Outcome of the last fetch attempt: "ok", "rate_limited",
         "error", or None when no attempt has been made yet."""

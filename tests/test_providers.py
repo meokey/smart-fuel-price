@@ -509,6 +509,52 @@ def test_rate_limited_records_whether_forced():
     assert provider.last_fetch_was_forced is False
 
 
+def test_source_url_defaults_to_none():
+    """A provider with no stable per-device URL reports None."""
+    from sfp_providers.base import BaseFuelPriceProvider
+
+    class _NoUrlProvider(BaseFuelPriceProvider):
+        @property
+        def name(self):
+            return "No URL"
+
+        def _parse_data(self):
+            return {"is_valid": True}
+
+    assert _NoUrlProvider("toronto").source_url is None
+
+
+def test_gasbuddy_source_url_points_at_station_page():
+    # Pattern live-verified: /station/<id> renders the station's page.
+    assert (
+        GasBuddyStationProvider("191273").source_url
+        == "https://www.gasbuddy.com/station/191273"
+    )
+
+
+def test_gaswizard_source_url_points_at_city_page():
+    assert (
+        AffordableEnergyCaProvider("toronto").source_url
+        == "https://www.gaswizard.ca/toronto"
+    )
+    # Unknown city falls back to the toronto slug, like _parse_data does.
+    assert (
+        AffordableEnergyCaProvider("atlantis").source_url
+        == "https://www.gaswizard.ca/toronto"
+    )
+
+
+def test_citynews_source_url_remembers_winning_page():
+    provider = CityNewsCaProvider("toronto")
+    assert provider.source_url is None  # nothing parsed yet
+
+    session = FakeSession({"https://toronto.citynews.ca/gas-prices/": CITYNEWS_TORONTO_HTML})
+    provider = CityNewsCaProvider("toronto", session=session)
+    data = provider.fetch_data()
+    assert data["is_valid"] is True
+    assert provider.source_url == "https://toronto.citynews.ca/gas-prices/"
+
+
 def test_summarize_fetch_status_priority():
     from sfp_providers.base import summarize_fetch_status
 

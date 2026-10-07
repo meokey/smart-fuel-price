@@ -18,6 +18,15 @@ from .const import (
     DEFAULT_CACHE_TTL_MINUTES,
 )
 from .providers.base import fresh_cache_slot, summarize_fetch_status
+
+# Device "model" shown on the HA device info card: what KIND of data this
+# device carries, at a glance (station live price vs city forecast).
+_DEVICE_MODEL = {
+    "gasbuddy_ca": "Gas station",
+    "affordableenergy_ca": "City fuel forecast",
+    "citynews_ca": "City fuel price",
+    "fuelwise_app": "City fuel price",
+}
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
@@ -151,21 +160,29 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     fetch_cache,
                     unique_suffix=grade,
                     suggested_area=device_city,
+                    model=_DEVICE_MODEL["gasbuddy_ca"],
+                    configuration_url=provider.source_url,
                 )
                 entities.append(sensor)
                 _register(device_key, device_name, sensor, provider)
+            device_model = _DEVICE_MODEL["gasbuddy_ca"]
+            device_source_url = station_providers[0].source_url
             last_updated = SmartFuelLastUpdatedSensor(
                 device_name, station_providers, "GasBuddy", device_key,
                 suggested_area=device_city,
+                model=device_model, configuration_url=device_source_url,
             )
             entities.append(last_updated)
             by_device[device_key]["last_updated"] = last_updated
             update_status = SmartFuelUpdateStatusSensor(
                 device_name, station_providers, "GasBuddy", device_key,
                 suggested_area=device_city,
+                model=device_model, configuration_url=device_source_url,
             )
             entities.append(update_status)
             by_device[device_key]["update_status"] = update_status
+            by_device[device_key]["model"] = device_model
+            by_device[device_key]["configuration_url"] = device_source_url
         async_add_entities(entities, True)
         hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
         return
@@ -199,6 +216,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     else:
         specs = [(None, "state", None)]
 
+    device_model = _DEVICE_MODEL.get(provider_type, "Fuel data")
+    device_source_url = provider.source_url
     sensors = []
     for entity_name, value_key, suffix in specs:
         sensor = SmartFuelSensor(
@@ -207,21 +226,27 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             unique_suffix=suffix,
             entity_name=entity_name,
             value_key=value_key,
+            model=device_model,
+            configuration_url=device_source_url,
         )
         sensors.append(sensor)
         _register(config_entry.entry_id, name, sensor, provider)
     last_updated = SmartFuelLastUpdatedSensor(
         name, [provider], provider.name, config_entry.entry_id,
         suggested_area=city.capitalize(),
+        model=device_model, configuration_url=device_source_url,
     )
     sensors.append(last_updated)
     by_device[config_entry.entry_id]["last_updated"] = last_updated
     update_status = SmartFuelUpdateStatusSensor(
         name, [provider], provider.name, config_entry.entry_id,
         suggested_area=city.capitalize(),
+        model=device_model, configuration_url=device_source_url,
     )
     sensors.append(update_status)
     by_device[config_entry.entry_id]["update_status"] = update_status
+    by_device[config_entry.entry_id]["model"] = device_model
+    by_device[config_entry.entry_id]["configuration_url"] = device_source_url
     async_add_entities(sensors, True)
     hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
 
@@ -241,7 +266,7 @@ class SmartFuelLastUpdatedSensor(SensorEntity):
     _attr_icon = "mdi:clock-outline"
 
     def __init__(self, device_name, providers, provider_name, device_key,
-                 suggested_area=None):
+                 suggested_area=None, model=None, configuration_url=None):
         self._providers = list(providers)
         self._attr_name = "Last updated"
         self._attr_unique_id = f"smart_fuel_price_{device_key}_last_updated"
@@ -251,7 +276,9 @@ class SmartFuelLastUpdatedSensor(SensorEntity):
             identifiers={(DOMAIN, device_key)},
             name=device_name,
             manufacturer=provider_name,
+            model=model,
             suggested_area=suggested_area,
+            configuration_url=configuration_url,
         )
         self._last_updated = None
 
@@ -297,7 +324,7 @@ class SmartFuelUpdateStatusSensor(SensorEntity):
     }
 
     def __init__(self, device_name, providers, provider_name, device_key,
-                 suggested_area=None):
+                 suggested_area=None, model=None, configuration_url=None):
         self._providers = list(providers)
         self._attr_name = "Update status"
         self._attr_unique_id = f"smart_fuel_price_{device_key}_update_status"
@@ -307,7 +334,9 @@ class SmartFuelUpdateStatusSensor(SensorEntity):
             identifiers={(DOMAIN, device_key)},
             name=device_name,
             manufacturer=provider_name,
+            model=model,
             suggested_area=suggested_area,
+            configuration_url=configuration_url,
         )
 
     @property
@@ -352,7 +381,8 @@ class SmartFuelSensor(SensorEntity):
 
     def __init__(self, device_name, provider, disabled_attributes, device_key,
                  fetch_cache, unique_suffix=None, suggested_area=None,
-                 entity_name=None, value_key="state"):
+                 entity_name=None, value_key="state", model=None,
+                 configuration_url=None):
         self._provider = provider
         self._disabled_attributes = disabled_attributes
         self._fetch_cache = fetch_cache
@@ -373,8 +403,9 @@ class SmartFuelSensor(SensorEntity):
             identifiers={(DOMAIN, device_key)},
             name=device_name,
             manufacturer=self._provider.name,
-            model=f"{self._provider.city.capitalize()} Fuel Data",
+            model=model,
             suggested_area=suggested_area,
+            configuration_url=configuration_url,
         )
 
         self._state = None
