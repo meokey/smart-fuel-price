@@ -113,6 +113,9 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
             return {"city": subdomain, "is_valid": False}
 
         _page_url, page_html = fetched
+        # Remember the winning URL: article slugs rotate, so the device info
+        # link must point at the page that actually parsed.
+        self._last_source_url = _page_url
 
         if parser_hint in ("forecast", "auto"):
             parsed = vendor_widgets.parse_en_pro_forecast(page_html)
@@ -134,6 +137,11 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
             subdomain,
         )
         return {"city": subdomain, "is_valid": False}
+
+    @property
+    def source_url(self) -> str | None:
+        """Last successfully parsed article URL (None before first success)."""
+        return getattr(self, "_last_source_url", None)
 
     def _fetch_gas_prices_page(self, subdomain: str) -> tuple[str, str] | None:
         """Try each known URL slug in turn; return (url, html) for the first hit."""
