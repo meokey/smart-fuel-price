@@ -252,6 +252,16 @@ class BaseFuelPriceProvider(ABC):
         data["from_cache"] = False
         return data
 
+    @property
+    def last_successful_fetch(self) -> datetime | None:
+        """When this provider last fetched fresh data successfully.
+
+        Updated on every successful fetch (automatic poll or manual
+        refresh) and when the persisted cache is hydrated after a restart.
+        Drives the per-device "Last updated" timestamp sensor.
+        """
+        return self._cached_at
+
     def hydrate_cache(self, data: dict[str, Any], fetched_at: datetime) -> None:
         """Restore a previously persisted cache (e.g. after HA restart)."""
         with self._cache_lock:
