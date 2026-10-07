@@ -277,6 +277,28 @@ def test_gasbuddy_station_end_to_end():
     )
 
 
+def test_gasbuddy_cents_per_litre_normalized_to_dollars():
+    """GasBuddy reports CA prices in cents/L (e.g. 168.9); the provider
+    must normalize to $/L so the "$" unit is correct. Values already in
+    dollars (<= 20) are left untouched."""
+    import copy
+    payload = copy.deepcopy(GASBUDDY_STATION_JSON)
+    payload["station"]["Fuels"][0]["CreditPrice"]["Amount"] = 168.9
+    session = FakePostSession(payload)
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+
+    assert data["is_valid"] is True
+    assert data["state"] == pytest.approx(1.689)
+    assert data["current_price"] == pytest.approx(1.689)
+
+
+def test_gasbuddy_dollar_amounts_left_untouched():
+    """The existing 1.649 fixture (already $/L) must not be divided."""
+    session = FakePostSession(GASBUDDY_STATION_JSON)
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+    assert data["state"] == pytest.approx(1.649)
+
+
 def test_gasbuddy_missing_station_fails_soft():
     session = FakePostSession({"station": None})
     data = GasBuddyStationProvider("999999", session=session).fetch_data()

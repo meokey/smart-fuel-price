@@ -200,6 +200,8 @@ class SmartFuelSensor(SensorEntity):
         self._attr_name = entity_name or self._provider.sensor_name
         self._attr_native_unit_of_measurement = self._provider.native_unit_of_measurement
         self._attr_icon = "mdi:gas-station"
+        # HA convention: credit the data source on every entity.
+        self._attr_attribution = f"Data provided by {self._provider.name}"
         self._attr_unique_id = (
             f"smart_fuel_price_{device_key}_{unique_suffix}"
             if unique_suffix else f"smart_fuel_price_{device_key}"

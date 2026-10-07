@@ -5,6 +5,7 @@ All data source plugins must inherit from this class.
 
 import logging
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from abc import ABC, abstractmethod
 from typing import Any
@@ -77,6 +78,10 @@ class BaseFuelPriceProvider(ABC):
         self._cached_data: dict[str, Any] | None = None
         self._cached_at: datetime | None = None
         self._last_attempt_at: datetime | None = None
+        # Serializes the check-then-fetch sequence in get_data(): HA may run
+        # coordinator updates on executor threads, so without the lock two
+        # threads could pass the TTL check together and fetch twice.
+        self._cache_lock = threading.Lock()
 
     @classmethod
     def _build_session(cls) -> requests.Session:
@@ -208,6 +213,13 @@ class BaseFuelPriceProvider(ABC):
           (``from_cache: True, stale: True``) when
           ``allow_stale_on_failure`` is set, else the invalid result.
         """
+        # Hold the lock across the check-and-fetch so concurrent threads
+        # serialize instead of issuing duplicate network requests.
+        with self._cache_lock:
+            return self._get_data_locked(force_refresh)
+
+    def _get_data_locked(self, force_refresh: bool) -> dict[str, Any]:
+        """Cache check + fetch; caller must hold ``self._cache_lock``."""
         now = datetime.now(timezone.utc)
         ttl = self._effective_ttl()
         if (
@@ -242,9 +254,10 @@ class BaseFuelPriceProvider(ABC):
 
     def hydrate_cache(self, data: dict[str, Any], fetched_at: datetime) -> None:
         """Restore a previously persisted cache (e.g. after HA restart)."""
-        self._cached_data = dict(data)
-        self._cached_at = fetched_at
-        self._last_attempt_at = fetched_at
+        with self._cache_lock:
+            self._cached_data = dict(data)
+            self._cached_at = fetched_at
+            self._last_attempt_at = fetched_at
 
     @abstractmethod
     def _parse_data(self) -> dict[str, Any]:
