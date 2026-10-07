@@ -96,6 +96,27 @@ fresh data arrives.
 Each device also gets a **Refresh data** button entity for a manual,
 cache-bypassing fetch at any time.
 
+### Suggested dashboard layout
+
+For a Gas Wizard device, a vertical stack keeps the three related sensors
+together, with the button card below for a manual refresh:
+
+```yaml
+type: vertical-stack
+cards:
+  - type: entities
+    title: Toronto — Gas Wizard
+    entities:
+      - sensor.smart_fuel_price_toronto_gas_wizard_today_s_price
+      - sensor.smart_fuel_price_toronto_gas_wizard_tomorrow_s_forecast
+      - sensor.smart_fuel_price_toronto_gas_wizard
+  - type: button
+    entity: button.smart_fuel_price_toronto_gas_wizard_refresh_data
+    name: Refresh data
+```
+
+(Adjust the entity IDs to match your own device/city.)
+
 ---
 
 ## Supported Providers & Cities
@@ -141,6 +162,10 @@ grades for the same station share a single device.
 GasBuddy's crowd-sourced prices can change more often than a forecast
 updates once a day, so these sensors refresh every 30 minutes rather
 than the 4-hour default used by the forecast providers.
+
+Note: GasBuddy reports Canadian prices in cents per litre (e.g. `168.9`
+for $1.689/L). The integration normalizes these to dollars per litre so
+the `$` unit is correct and consistent with the other sensors.
 
 *Station price data is retrieved via an endpoint documented by the
 [Red5d/ha-gasbuddy](https://github.com/Red5d/ha-gasbuddy) project —
