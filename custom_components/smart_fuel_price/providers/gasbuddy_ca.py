@@ -21,7 +21,7 @@ Response (abridged):
         "ZipCode": "...", "Lat": ..., "Lng": ...,
         "APIFuel": [{"Id": 1, "Available": true, "DisplayName": "Regular"}, ...],
         "Fuels": [{"FuelType": 1, "CreditPrice": {
-            "Amount": 164.9, "TimePosted": "/Date(1758931200000)/"  # cents/L -> $1.649/L
+            "Amount": 164.9, "TimePosted": "/Date(1758931200000)/"  # cents per litre
         }}, ...]
       }
     }
@@ -135,7 +135,9 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
 
     @property
     def native_unit_of_measurement(self) -> str:
-        return "$"
+        # Amount is reported in cents per litre; keep the raw value and
+        # label it ¢/L (Canadian pump convention, consistent with Gas Wizard).
+        return "¢/L"
 
     @property
     def scan_interval(self) -> timedelta:
@@ -240,13 +242,8 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
         if price is None:
             return {"is_valid": False}
 
-        # GasBuddy reports Canadian retail prices in cents per litre
-        # (e.g. 168.9 for $1.689/L); normalize to dollars per litre so the
-        # "$" unit is correct and consistent with the other sensors.
-        # The threshold keeps already-dollar values (<= 20) untouched.
-        if price > 20:
-            price = round(price / 100, 3)
-
+        # Amount is already in cents per litre (e.g. 168.9); pass it
+        # through raw -- the "¢/L" unit label carries the meaning.
         return {
             "state": price,
             "tomorrow_price": None,  # GasBuddy is a live snapshot, not a forecast
