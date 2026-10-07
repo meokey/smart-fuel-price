@@ -15,6 +15,33 @@ import requests
 _LOGGER = logging.getLogger(__name__)
 
 
+class RateLimitedError(Exception):
+    """Raised by providers when the source throttles us (HTTP 429, or 403
+    where the site uses it for bot-protection).
+
+    Caught in :meth:`BaseFuelPriceProvider.fetch_data`, which marks the
+    result with ``rate_limited: True`` instead of treating it as a generic
+    failure -- so status tracking (and the "Update status" sensor) can tell
+    "slow down" apart from "broken".
+    """
+
+
+def summarize_fetch_status(statuses: list[str | None]) -> str | None:
+    """Worst-of aggregation of per-provider fetch statuses for one device.
+
+    Priority: ``rate_limited`` > ``error`` > ``ok`` -- rate-limiting is
+    surfaced first because it has a concrete user action (raise the cache
+    threshold). Returns None when no provider has attempted a fetch yet.
+    """
+    if any(s == "rate_limited" for s in statuses):
+        return "rate_limited"
+    if any(s == "error" for s in statuses):
+        return "error"
+    if statuses and all(s == "ok" for s in statuses):
+        return "ok"
+    return None
+
+
 def fresh_cache_slot(provider: "BaseFuelPriceProvider", data: dict[str, Any] | None) -> dict[str, Any] | None:
     """Build the persisted-cache slot for a fresh, valid fetch.
 
@@ -95,6 +122,14 @@ class BaseFuelPriceProvider(ABC):
         self._cached_data: dict[str, Any] | None = None
         self._cached_at: datetime | None = None
         self._last_attempt_at: datetime | None = None
+        # Outcome of the last fetch attempt: "ok", "rate_limited", "error",
+        # or None when no attempt has been made yet. Drives the per-device
+        # "Update status" sensor.
+        self._last_fetch_status: str | None = None
+        # Whether that attempt was a manual (forced) refresh -- a rate limit
+        # hit by an automatic poll suggests raising the cache threshold,
+        # while one hit by a manual press needs no such hint.
+        self._last_fetch_was_forced: bool = False
         # Serializes the check-then-fetch sequence in get_data(): HA may run
         # coordinator updates on executor threads, so without the lock two
         # threads could pass the TTL check together and fetch twice.
@@ -197,6 +232,9 @@ class BaseFuelPriceProvider(ABC):
             parsed_data = self._parse_data()
             if parsed_data:
                 result.update(parsed_data)
+        except RateLimitedError as rl_err:
+            _LOGGER.info("[%s] Rate limited by source: %s", self.name, rl_err)
+            result["rate_limited"] = True
         except requests.exceptions.RequestException as req_err:
             _LOGGER.error("[%s] Network connection error: %s", self.name, req_err)
         except (KeyError, IndexError, ValueError, TypeError) as parse_err:
@@ -250,12 +288,18 @@ class BaseFuelPriceProvider(ABC):
             return cached
 
         self._last_attempt_at = now
+        self._last_fetch_was_forced = force_refresh
         data = self.fetch_data()
+        # Internal flag only -- must not leak into entity attributes.
+        rate_limited = bool(data.pop("rate_limited", False))
         if data.get("is_valid"):
             self._cached_data = dict(data)
             self._cached_at = now
+            self._last_fetch_status = "ok"
             data["from_cache"] = False
             return data
+
+        self._last_fetch_status = "rate_limited" if rate_limited else "error"
 
         if self.allow_stale_on_failure and self._cached_data is not None:
             _LOGGER.info(
@@ -268,6 +312,17 @@ class BaseFuelPriceProvider(ABC):
 
         data["from_cache"] = False
         return data
+
+    @property
+    def last_fetch_status(self) -> str | None:
+        """Outcome of the last fetch attempt: "ok", "rate_limited",
+        "error", or None when no attempt has been made yet."""
+        return self._last_fetch_status
+
+    @property
+    def last_fetch_was_forced(self) -> bool:
+        """Whether the last fetch attempt was a manual (forced) refresh."""
+        return self._last_fetch_was_forced
 
     @property
     def last_successful_fetch(self) -> datetime | None:
