@@ -2,7 +2,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorEntity, SensorStateClass, SensorDeviceClass
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.storage import Store
 from homeassistant.const import CONF_NAME
@@ -96,8 +96,14 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     # to build one manual-refresh button per device.
     by_device: dict = {}
 
-    def _register(device_key: str, device_name: str, sensor: "SmartFuelSensor") -> None:
-        by_device.setdefault(device_key, {"name": device_name, "sensors": []})["sensors"].append(sensor)
+    def _register(device_key: str, device_name: str, sensor: "SmartFuelSensor",
+                provider) -> None:
+        info = by_device.setdefault(
+            device_key, {"name": device_name, "sensors": [], "providers": []}
+        )
+        info["sensors"].append(sensor)
+        if provider not in info["providers"]:
+            info["providers"].append(provider)
 
     if provider_type == "gasbuddy_ca":
         station_ids = [s.strip() for s in data.get(CONF_STATION_IDS, "").split(",") if s.strip()]
@@ -108,10 +114,12 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             device_key = f"{config_entry.entry_id}_{station_id}"
             device_city = None
             device_station_name = None
+            station_providers = []
             for grade in fuel_grades:
                 provider = GasBuddyStationProvider(station_id, grade)
                 provider.cache_ttl = ttl
                 _hydrate_provider(provider, fetch_cache)
+                station_providers.append(provider)
                 # get_data() (not fetch_data()) so this warms the cache --
                 # the first scheduled update then reuses it instead of
                 # fetching twice.
@@ -133,7 +141,13 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     suggested_area=device_city,
                 )
                 entities.append(sensor)
-                _register(device_key, device_name, sensor)
+                _register(device_key, device_name, sensor, provider)
+            last_updated = SmartFuelLastUpdatedSensor(
+                device_name, station_providers, "GasBuddy", device_key,
+                suggested_area=device_city,
+            )
+            entities.append(last_updated)
+            by_device[device_key]["last_updated"] = last_updated
         async_add_entities(entities, True)
         hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
         return
@@ -177,9 +191,62 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             value_key=value_key,
         )
         sensors.append(sensor)
-        _register(config_entry.entry_id, name, sensor)
+        _register(config_entry.entry_id, name, sensor, provider)
+    last_updated = SmartFuelLastUpdatedSensor(
+        name, [provider], provider.name, config_entry.entry_id,
+        suggested_area=city.capitalize(),
+    )
+    sensors.append(last_updated)
+    by_device[config_entry.entry_id]["last_updated"] = last_updated
     async_add_entities(sensors, True)
     hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
+
+
+class SmartFuelLastUpdatedSensor(SensorEntity):
+    """Per-device timestamp of the last successful data fetch.
+
+    Covers both automatic polls and manual Refresh-button presses, so the
+    device page always shows when its data was actually refreshed from the
+    source. (The button entity's own timestamp only records manual presses
+    -- standard HA button behavior -- which is why it can read "Unknown"
+    or look stale next to fresh sensor data.)
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-outline"
+
+    def __init__(self, device_name, providers, provider_name, device_key,
+                 suggested_area=None):
+        self._providers = list(providers)
+        self._attr_name = "Last updated"
+        self._attr_unique_id = f"smart_fuel_price_{device_key}_last_updated"
+        # HA convention: credit the data source on every entity.
+        self._attr_attribution = f"Data provided by {provider_name}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_key)},
+            name=device_name,
+            manufacturer=provider_name,
+            suggested_area=suggested_area,
+        )
+        self._last_updated = None
+
+    @property
+    def native_value(self):
+        """Latest successful fetch across this device's providers."""
+        return self._last_updated
+
+    async def async_update(self):
+        """Recompute from the providers' last-successful-fetch stamps.
+
+        No I/O here -- the providers are polled through the regular price
+        sensors on the same SCAN_INTERVAL; this just surfaces their stamp.
+        """
+        stamps = [
+            p.last_successful_fetch for p in self._providers
+            if p.last_successful_fetch is not None
+        ]
+        self._last_updated = max(stamps) if stamps else None
 
 
 class SmartFuelSensor(SensorEntity):

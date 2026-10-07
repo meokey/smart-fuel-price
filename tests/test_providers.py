@@ -7,6 +7,8 @@ A fake requests-style session is injected through the provider's
 import pytest
 import requests
 
+from datetime import datetime, timedelta, timezone
+
 from sfp_providers.affordableenergy_ca import AffordableEnergyCaProvider
 from sfp_providers.citynews_ca import CityNewsCaProvider
 from sfp_providers.gasbuddy_ca import GasBuddyStationProvider
@@ -34,7 +36,6 @@ class FakeSession:
             return FakeResponse(self.pages[url])
         return FakeResponse("", status_code=404)
 
-from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 _EASTERN = ZoneInfo("America/Toronto")
@@ -217,8 +218,8 @@ GASBUDDY_STATION_JSON = {
             {"Id": 2, "Available": True, "DisplayName": "Premium"},
         ],
         "Fuels": [
-            {"FuelType": 1, "CreditPrice": {"Amount": 1.649, "TimePosted": "/Date(1758931200000)/"}},
-            {"FuelType": 2, "CreditPrice": {"Amount": 1.799, "TimePosted": "/Date(1758931200000)/"}},
+            {"FuelType": 1, "CreditPrice": {"Amount": 164.9, "TimePosted": "/Date(1758931200000)/"}},
+            {"FuelType": 2, "CreditPrice": {"Amount": 179.9, "TimePosted": "/Date(1758931200000)/"}},
         ],
     }
 }
@@ -266,8 +267,8 @@ def test_gasbuddy_station_end_to_end():
     data = GasBuddyStationProvider("205748", session=session).fetch_data()
 
     assert data["is_valid"] is True
-    assert data["state"] == pytest.approx(1.649)
-    assert data["current_price"] == pytest.approx(1.649)
+    assert data["state"] == pytest.approx(164.9)
+    assert data["current_price"] == pytest.approx(164.9)
     assert data["tomorrow_price"] is None
     assert data["station_name"] == "Costco"
     assert data["city"] == "Oshawa"
@@ -277,26 +278,20 @@ def test_gasbuddy_station_end_to_end():
     )
 
 
-def test_gasbuddy_cents_per_litre_normalized_to_dollars():
-    """GasBuddy reports CA prices in cents/L (e.g. 168.9); the provider
-    must normalize to $/L so the "$" unit is correct. Values already in
-    dollars (<= 20) are left untouched."""
+def test_gasbuddy_amount_reported_as_cents_per_litre():
+    """Amount is already in cents/L (e.g. 168.9) -- pass it through raw
+    with the \u00a2/L unit; never divide."""
     import copy
     payload = copy.deepcopy(GASBUDDY_STATION_JSON)
     payload["station"]["Fuels"][0]["CreditPrice"]["Amount"] = 168.9
     session = FakePostSession(payload)
-    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+    provider = GasBuddyStationProvider("205748", session=session)
+    data = provider.fetch_data()
 
     assert data["is_valid"] is True
-    assert data["state"] == pytest.approx(1.689)
-    assert data["current_price"] == pytest.approx(1.689)
-
-
-def test_gasbuddy_dollar_amounts_left_untouched():
-    """The existing 1.649 fixture (already $/L) must not be divided."""
-    session = FakePostSession(GASBUDDY_STATION_JSON)
-    data = GasBuddyStationProvider("205748", session=session).fetch_data()
-    assert data["state"] == pytest.approx(1.649)
+    assert data["state"] == pytest.approx(168.9)
+    assert data["current_price"] == pytest.approx(168.9)
+    assert provider.native_unit_of_measurement == "\u00a2/L"
 
 
 def test_gasbuddy_missing_station_fails_soft():
@@ -431,7 +426,7 @@ def test_gasbuddy_serves_stale_price_on_rate_limit():
     provider.cache_ttl = timedelta(minutes=30)
     first = provider.get_data()
     assert first["is_valid"] is True
-    assert first["state"] == pytest.approx(1.649)
+    assert first["state"] == pytest.approx(164.9)
 
     class _RateLimitedSession(FakePostSession):
         def post(self, url, data=None, **kwargs):
@@ -445,13 +440,39 @@ def test_gasbuddy_serves_stale_price_on_rate_limit():
     assert second["is_valid"] is True
     assert second["stale"] is True
     assert second["from_cache"] is True
-    assert second["state"] == pytest.approx(1.649)
+    assert second["state"] == pytest.approx(164.9)
 
 
 def test_gasbuddy_cache_key_includes_grade():
     a = GasBuddyStationProvider("205748", "regular")
     b = GasBuddyStationProvider("205748", "premium")
     assert a.cache_key != b.cache_key
+
+
+def test_last_successful_fetch_tracks_fetches():
+    """Drives the per-device "Last updated" timestamp sensor."""
+    session = FakePostSession(GASBUDDY_STATION_JSON)
+    provider = GasBuddyStationProvider("205748", session=session)
+    assert provider.last_successful_fetch is None
+
+    before = datetime.now(timezone.utc)
+    data = provider.get_data()
+    after = datetime.now(timezone.utc)
+    assert data["is_valid"] is True
+    assert before <= provider.last_successful_fetch <= after
+
+    # A within-TTL cached read must NOT move the stamp.
+    stamp = provider.last_successful_fetch
+    provider.get_data()
+    assert provider.last_successful_fetch == stamp
+
+
+def test_last_successful_fetch_restored_from_persisted_cache():
+    """After a restart, "Last updated" shows the persisted fetch time."""
+    provider = GasBuddyStationProvider("205748", session=FakePostSession({}))
+    ts = datetime(2026, 10, 7, 7, 30, tzinfo=timezone.utc)
+    provider.hydrate_cache({"is_valid": True}, ts)
+    assert provider.last_successful_fetch == ts
 
 
 def test_hydrate_cache_serves_without_network():
