@@ -62,7 +62,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .base import BaseFuelPriceProvider
+from .base import BaseFuelPriceProvider, RateLimitedError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -176,15 +176,14 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
         )
 
         if response.status_code in (403, 429):
-            # Handled transient: get_data() falls back to the cached price
-            # when one exists, so info-level only.
-            _LOGGER.info(
-                "[%s] Station '%s' got HTTP %s from GasBuddy -- this looks "
-                "like rate-limiting or temporary bot-protection, not a real "
-                "data problem. Will try again on the next scheduled poll.",
-                self.name, self.station_id, response.status_code,
+            # Handled transient: base.fetch_data() catches this and marks the
+            # result rate-limited (not a generic failure), and get_data()
+            # falls back to the cached price when one exists.
+            raise RateLimitedError(
+                f"Station '{self.station_id}' got HTTP {response.status_code} "
+                "-- rate-limiting or temporary bot-protection; will try again "
+                "on the next scheduled poll."
             )
-            return None
 
         response.raise_for_status()
 

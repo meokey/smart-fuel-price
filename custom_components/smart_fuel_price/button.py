@@ -19,7 +19,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     by_device = hass.data[DOMAIN].get("sensors", {}).get(config_entry.entry_id, {})
     buttons = [
         SmartFuelRefreshButton(
-            device_key, info["name"], info["sensors"], info.get("last_updated")
+            device_key, info["name"], info["sensors"],
+            info.get("last_updated"), info.get("update_status"),
         )
         for device_key, info in by_device.items()
     ]
@@ -36,9 +37,10 @@ class SmartFuelRefreshButton(ButtonEntity):
     _attr_icon = "mdi:refresh"
 
     def __init__(self, device_key: str, device_name: str, sensors: list,
-                 last_updated=None) -> None:
+                 last_updated=None, update_status=None) -> None:
         self._sensors = sensors
         self._last_updated = last_updated
+        self._update_status = update_status
         self._attr_name = "Manual refresh"
         self._attr_unique_id = f"smart_fuel_price_{device_key}_refresh"
         self._attr_device_info = DeviceInfo(
@@ -56,9 +58,10 @@ class SmartFuelRefreshButton(ButtonEntity):
             await sensor.async_force_refresh()
         for sensor in self._sensors:
             await sensor.async_update()
-        # The manual fetch just refreshed the providers -- reflect it on the
-        # device's "Last updated" sensor immediately instead of waiting for
-        # the next poll.
-        if self._last_updated is not None:
-            await self._last_updated.async_update()
-            self._last_updated.async_write_ha_state()
+        # The manual fetch just ran -- reflect it on the device's
+        # "Last updated" / "Update status" sensors immediately instead of
+        # waiting for the next poll.
+        for entity in (self._last_updated, self._update_status):
+            if entity is not None:
+                await entity.async_update()
+                entity.async_write_ha_state()

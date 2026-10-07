@@ -94,10 +94,18 @@ Forecast providers never serve stale forecasts; they show `unknown` until
 fresh data arrives.
 
 Each device also gets a **Manual refresh** button entity for a manual,
-cache-bypassing fetch at any time, and a **Last updated** timestamp sensor
+cache-bypassing fetch at any time, a **Last updated** timestamp sensor
 showing when the device's data was last successfully fetched -- covering
-both automatic polls and manual refreshes. (The button's own timestamp only
-records manual presses, which is standard Home Assistant button behavior.)
+both automatic polls and manual refreshes -- and an **Update status**
+sensor (`OK` / `Rate limited` / `Failed`) reporting the outcome of the last
+fetch attempt. (The button's own timestamp only records manual presses,
+which is standard Home Assistant button behavior.)
+
+Rate limiting (HTTP 429, or 403 where a source uses it for bot-protection)
+is tracked separately from generic failures. When *automatic* polls get
+rate-limited, the Update status sensor carries a `suggestion` attribute
+advising you to raise the cache threshold for that entry (Options) -- a
+manual press that hits the limit needs no such hint.
 
 ### Suggested dashboard layout
 

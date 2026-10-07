@@ -17,7 +17,7 @@ from .const import (
     CONF_CACHE_TTL_MINUTES,
     DEFAULT_CACHE_TTL_MINUTES,
 )
-from .providers.base import fresh_cache_slot
+from .providers.base import fresh_cache_slot, summarize_fetch_status
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
@@ -156,6 +156,12 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             )
             entities.append(last_updated)
             by_device[device_key]["last_updated"] = last_updated
+            update_status = SmartFuelUpdateStatusSensor(
+                device_name, station_providers, "GasBuddy", device_key,
+                suggested_area=device_city,
+            )
+            entities.append(update_status)
+            by_device[device_key]["update_status"] = update_status
         async_add_entities(entities, True)
         hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
         return
@@ -206,6 +212,12 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     )
     sensors.append(last_updated)
     by_device[config_entry.entry_id]["last_updated"] = last_updated
+    update_status = SmartFuelUpdateStatusSensor(
+        name, [provider], provider.name, config_entry.entry_id,
+        suggested_area=city.capitalize(),
+    )
+    sensors.append(update_status)
+    by_device[config_entry.entry_id]["update_status"] = update_status
     async_add_entities(sensors, True)
     hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
 
@@ -255,6 +267,77 @@ class SmartFuelLastUpdatedSensor(SensorEntity):
             if p.last_successful_fetch is not None
         ]
         self._last_updated = max(stamps) if stamps else None
+
+
+class SmartFuelUpdateStatusSensor(SensorEntity):
+    """Per-device status of the last fetch attempt.
+
+    States: "OK" (last attempt succeeded), "Rate limited" (the source
+    answered HTTP 429, or 403 where it uses that for bot-protection),
+    "Failed" (any other error). Unknown until the first attempt. Sits right
+    next to the "Last updated" sensor; when automatic polls get
+    rate-limited, a ``suggestion`` attribute advises raising the cache
+    threshold in Options. (A manual press that hits the limit needs no such
+    hint -- the user chose the timing.)
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["OK", "Rate limited", "Failed"]
+
+    _DISPLAY = {"ok": "OK", "rate_limited": "Rate limited", "error": "Failed"}
+    _ICONS = {
+        "OK": "mdi:check-circle-outline",
+        "Rate limited": "mdi:timer-sand",
+        "Failed": "mdi:alert-circle-outline",
+    }
+
+    def __init__(self, device_name, providers, provider_name, device_key,
+                 suggested_area=None):
+        self._providers = list(providers)
+        self._attr_name = "Update status"
+        self._attr_unique_id = f"smart_fuel_price_{device_key}_update_status"
+        # HA convention: credit the data source on every entity.
+        self._attr_attribution = f"Data provided by {provider_name}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_key)},
+            name=device_name,
+            manufacturer=provider_name,
+            suggested_area=suggested_area,
+        )
+
+    @property
+    def native_value(self):
+        """Worst-of status across this device's providers, as display text."""
+        summary = summarize_fetch_status(
+            [p.last_fetch_status for p in self._providers]
+        )
+        return self._DISPLAY.get(summary)
+
+    @property
+    def icon(self):
+        """Icon follows the status so the card reads at a glance."""
+        return self._ICONS.get(self.native_value, "mdi:help-circle-outline")
+
+    @property
+    def extra_state_attributes(self):
+        """Hint at raising the cache threshold when *automatic* polls are
+        being rate-limited."""
+        if any(
+            p.last_fetch_status == "rate_limited" and not p.last_fetch_was_forced
+            for p in self._providers
+        ):
+            return {
+                "suggestion": (
+                    "Automatic updates are being rate-limited by the source. "
+                    "Consider increasing the cache threshold for this entry "
+                    "(Options) to reduce the request rate."
+                )
+            }
+        return {}
+
+    async def async_update(self):
+        """No I/O -- the status is read live from the providers."""
 
 
 class SmartFuelSensor(SensorEntity):
