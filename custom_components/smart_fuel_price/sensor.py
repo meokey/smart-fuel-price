@@ -17,6 +17,7 @@ from .const import (
     CONF_CACHE_TTL_MINUTES,
     DEFAULT_CACHE_TTL_MINUTES,
 )
+from .providers.base import fresh_cache_slot
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
@@ -124,6 +125,13 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 # the first scheduled update then reuses it instead of
                 # fetching twice.
                 preview = await hass.async_add_executor_job(provider.get_data)
+                # The preview may have hit the network (TTL expired) -- if so,
+                # persist it like a regular update; otherwise a restart would
+                # hydrate an older "Last updated" than the data we actually hold.
+                slot = fresh_cache_slot(provider, preview)
+                if slot is not None:
+                    fetch_cache[provider.cache_key] = slot
+                    await _save_fetch_cache(hass, fetch_cache)
                 if device_city is None:
                     device_city = preview.get("city") or station_id
                     device_station_name = preview.get("station_name") or f"Station {station_id}"
@@ -318,11 +326,9 @@ class SmartFuelSensor(SensorEntity):
             if data:
                 self._state = data.get(self._value_key)
                 self._attributes = data
-                if not data.get("from_cache") and data.get("is_valid"):
-                    self._fetch_cache[self._provider.cache_key] = {
-                        "data": data,
-                        "fetched_at": datetime.now(timezone.utc).timestamp(),
-                    }
+                slot = fresh_cache_slot(self._provider, data)
+                if slot is not None:
+                    self._fetch_cache[self._provider.cache_key] = slot
                     await _save_fetch_cache(self.hass, self._fetch_cache)
             else:
                 _LOGGER.warning("Received empty data payload from provider: %s", self._provider.name)
