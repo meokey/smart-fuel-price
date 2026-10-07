@@ -94,7 +94,10 @@ Forecast providers never serve stale forecasts; they show `unknown` until
 fresh data arrives.
 
 Each device also gets a **Refresh data** button entity for a manual,
-cache-bypassing fetch at any time.
+cache-bypassing fetch at any time, and a **Last updated** timestamp sensor
+showing when the device's data was last successfully fetched -- covering
+both automatic polls and manual refreshes. (The button's own timestamp only
+records manual presses, which is standard Home Assistant button behavior.)
 
 ### Suggested dashboard layout
 
@@ -164,8 +167,8 @@ updates once a day, so these sensors refresh every 30 minutes rather
 than the 4-hour default used by the forecast providers.
 
 Note: GasBuddy reports Canadian prices in cents per litre (e.g. `168.9`
-for $1.689/L). The integration normalizes these to dollars per litre so
-the `$` unit is correct and consistent with the other sensors.
+\u00a2/L). The value is shown as-is with the `\u00a2/L` unit, consistent
+with the other sensors and with how prices are quoted on Canadian pumps.
 
 *Station price data is retrieved via an endpoint documented by the
 [Red5d/ha-gasbuddy](https://github.com/Red5d/ha-gasbuddy) project —
