@@ -150,6 +150,12 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
         """Clear the shared per-station cache. Exposed mainly for tests."""
         cls._station_cache.clear()
 
+    @property
+    def source_url(self) -> str | None:
+        # Verified: https://www.gasbuddy.com/station/<id> renders the
+        # station's page (name, address, community prices).
+        return f"https://www.gasbuddy.com/station/{self.station_id}"
+
     def _fetch_station_json(self) -> dict[str, Any] | None:
         """Fetch (or reuse a recent cached copy of) this station's full
         JSON payload. Returns None on any failure (bad response, rate
