@@ -443,6 +443,83 @@ def test_gasbuddy_serves_stale_price_on_rate_limit():
     assert second["state"] == pytest.approx(164.9)
 
 
+@pytest.mark.parametrize("status_code", [403, 429])
+def test_fetch_status_rate_limited(status_code):
+    """HTTP 429 (and 403 used for bot-protection) is tracked distinctly
+    from generic failures, and the internal flag never leaks into the
+    payload that becomes entity attributes."""
+
+    class _LimitedSession(FakePostSession):
+        def post(self, url, data=None, **kwargs):
+            return FakeResponse("", status_code=status_code)
+
+    GasBuddyStationProvider._clear_station_cache()
+    provider = GasBuddyStationProvider("205748", session=_LimitedSession({}))
+    provider.cache_ttl = timedelta(minutes=30)
+    data = provider.get_data(force_refresh=True)
+    assert data["is_valid"] is False
+    assert provider.last_fetch_status == "rate_limited"
+    assert "rate_limited" not in data
+
+
+def test_fetch_status_ok_on_success():
+    GasBuddyStationProvider._clear_station_cache()
+    provider = GasBuddyStationProvider(
+        "205748", session=FakePostSession(GASBUDDY_STATION_JSON)
+    )
+    assert provider.last_fetch_status is None  # no attempt yet
+    data = provider.get_data(force_refresh=True)
+    assert data["is_valid"] is True
+    assert provider.last_fetch_status == "ok"
+
+
+def test_fetch_status_error_on_server_error():
+    class _BrokenSession(FakePostSession):
+        def post(self, url, data=None, **kwargs):
+            return FakeResponse("", status_code=500)
+
+    GasBuddyStationProvider._clear_station_cache()
+    provider = GasBuddyStationProvider("205748", session=_BrokenSession({}))
+    provider.cache_ttl = timedelta(minutes=30)
+    data = provider.get_data(force_refresh=True)
+    assert data["is_valid"] is False
+    assert provider.last_fetch_status == "error"
+
+
+def test_rate_limited_records_whether_forced():
+    """The threshold-hint is only shown for *automatic* polls -- a manual
+    press that hits the limit needs no such suggestion."""
+
+    class _LimitedSession(FakePostSession):
+        def post(self, url, data=None, **kwargs):
+            return FakeResponse("", status_code=429)
+
+    GasBuddyStationProvider._clear_station_cache()
+    provider = GasBuddyStationProvider("205748", session=_LimitedSession({}))
+    provider.cache_ttl = timedelta(minutes=30)
+
+    provider.get_data(force_refresh=True)
+    assert provider.last_fetch_status == "rate_limited"
+    assert provider.last_fetch_was_forced is True
+
+    GasBuddyStationProvider._clear_station_cache()
+    provider._last_attempt_at = None  # force another real attempt
+    provider.get_data()
+    assert provider.last_fetch_status == "rate_limited"
+    assert provider.last_fetch_was_forced is False
+
+
+def test_summarize_fetch_status_priority():
+    from sfp_providers.base import summarize_fetch_status
+
+    assert summarize_fetch_status(["ok", "ok"]) == "ok"
+    assert summarize_fetch_status(["ok", "rate_limited"]) == "rate_limited"
+    assert summarize_fetch_status(["ok", "error"]) == "error"
+    assert summarize_fetch_status(["rate_limited", "error"]) == "rate_limited"
+    assert summarize_fetch_status([None, None]) is None
+    assert summarize_fetch_status([]) is None
+
+
 def test_gasbuddy_cache_key_includes_grade():
     a = GasBuddyStationProvider("205748", "regular")
     b = GasBuddyStationProvider("205748", "premium")
