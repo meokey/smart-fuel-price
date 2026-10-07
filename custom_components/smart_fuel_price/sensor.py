@@ -28,7 +28,11 @@ _LOGGER = logging.getLogger(__name__)
 # Options flow) decides whether a poll actually hits the network.
 SCAN_INTERVAL = timedelta(minutes=15)
 
-_FETCH_CACHE_VERSION = 1
+# Bumped to 2 in v2.3.24: GasBuddy values cached under v2.3.20/v2.3.21 were
+# dollar-normalized (Amount/100) and would otherwise display mislabeled under
+# the corrected \u00a2/L unit (e.g. a stale "1.749 \u00a2/L"). Old slots are
+# dropped; every provider simply refetches on the next setup.
+_FETCH_CACHE_VERSION = 2
 _FETCH_CACHE_KEY = f"{DOMAIN}_fetch_cache"
 
 
