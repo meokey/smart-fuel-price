@@ -21,7 +21,7 @@ Response (abridged):
         "ZipCode": "...", "Lat": ..., "Lng": ...,
         "APIFuel": [{"Id": 1, "Available": true, "DisplayName": "Regular"}, ...],
         "Fuels": [{"FuelType": 1, "CreditPrice": {
-            "Amount": 1.649, "TimePosted": "/Date(1758931200000)/"
+            "Amount": 164.9, "TimePosted": "/Date(1758931200000)/"  # cents/L -> $1.649/L
         }}, ...]
       }
     }
@@ -239,6 +239,13 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
         price = matched_fuel.get("CreditPrice", {}).get("Amount")
         if price is None:
             return {"is_valid": False}
+
+        # GasBuddy reports Canadian retail prices in cents per litre
+        # (e.g. 168.9 for $1.689/L); normalize to dollars per litre so the
+        # "$" unit is correct and consistent with the other sensors.
+        # The threshold keeps already-dollar values (<= 20) untouched.
+        if price > 20:
+            price = round(price / 100, 3)
 
         return {
             "state": price,
