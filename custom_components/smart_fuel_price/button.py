@@ -39,7 +39,7 @@ class SmartFuelRefreshButton(ButtonEntity):
                  last_updated=None) -> None:
         self._sensors = sensors
         self._last_updated = last_updated
-        self._attr_name = "Refresh data"
+        self._attr_name = "Manual refresh"
         self._attr_unique_id = f"smart_fuel_price_{device_key}_refresh"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device_key)},
@@ -47,9 +47,15 @@ class SmartFuelRefreshButton(ButtonEntity):
         )
 
     async def async_press(self) -> None:
-        """Fetch fresh data for each sensor on this device."""
+        """Fetch fresh data for each sensor on this device.
+
+        Afterwards every sensor re-reads from the warmed cache so entities
+        sharing one provider can't end up showing different fetches.
+        """
         for sensor in self._sensors:
             await sensor.async_force_refresh()
+        for sensor in self._sensors:
+            await sensor.async_update()
         # The manual fetch just refreshed the providers -- reflect it on the
         # device's "Last updated" sensor immediately instead of waiting for
         # the next poll.
