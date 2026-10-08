@@ -84,6 +84,8 @@ query GetStation($id: ID!) {
     phone
     priceUnit
     currency
+    latitude
+    longitude
     address {
       line1
       line2
@@ -405,6 +407,8 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
             ),
             "city": address.get("locality"),  # overwrites base default (was the station ID)
             "province_or_state": address.get("region"),
+            "latitude": station.get("latitude"),
+            "longitude": station.get("longitude"),
             "price_unit": station.get("priceUnit"),
             "currency": station.get("currency"),
         }

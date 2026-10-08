@@ -220,6 +220,8 @@ GASBUDDY_GRAPHQL_STATION = {
     "phone": "905-555-0100",
     "priceUnit": "¢/L",
     "currency": "CAD",
+    "latitude": 43.94,
+    "longitude": -78.83,
     "address": {
         "line1": "90 Windfields Farm Dr E",
         "line2": None,
@@ -300,6 +302,8 @@ def test_gasbuddy_station_end_to_end():
     assert data["station_name"] == "Costco"
     assert data["city"] == "Oshawa"
     assert data["phone"] == "905-555-0100"
+    assert data["latitude"] == pytest.approx(43.94)
+    assert data["longitude"] == pytest.approx(-78.83)
 
     url, payload, headers = session.posted_with
     assert url == "https://www.gasbuddy.com/graphql"
