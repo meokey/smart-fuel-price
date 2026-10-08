@@ -58,6 +58,26 @@ def fresh_cache_slot(provider: "BaseFuelPriceProvider", data: dict[str, Any] | N
         }
     return None
 
+
+def merge_fetch_cache_slots(
+    current: dict[str, Any], incoming: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge one entry's freshly-persisted slots into what's on disk.
+
+    Every config entry holds its own in-memory snapshot of the fetch
+    cache and saves on its own poll schedule. A plain full-overwrite
+    save has a stale-snapshot last-writer-wins race: an entry whose
+    snapshot predates another entry's save silently wipes that entry's
+    slots from the file (seen live: a warm GasBuddy slot vanished across
+    restarts, leaving the price sensor at Unknown with nothing to fall
+    back on). Merging fixes it: slot keys are per-provider
+    (``provider.cache_key``) and only the owning entry ever writes its
+    own keys, so an update can add/refresh but never delete another
+    entry's slots. Callers must still serialize load-merge-save.
+    """
+    current.update(incoming)
+    return current
+
 # Several target sites (and third-party widgets embedded on them) block or
 # mis-serve requests carrying the default python-requests User-Agent string.
 DEFAULT_HEADERS = {

@@ -360,6 +360,29 @@ def test_cache_hit_marks_status_ok_not_unknown():
     assert provider.last_fetch_status == "ok"  # ...but the serving was healthy
     assert provider.last_fetch_was_forced is False
 
+
+def test_merge_fetch_cache_slots_keeps_other_entries_slots():
+    """Regression: the old full-overwrite save let one config entry's
+    stale in-memory snapshot wipe another entry's persisted slots
+    (seen live: a warm GasBuddy slot vanished across restarts, leaving
+    the price sensor at Unknown with nothing to fall back on)."""
+    from sfp_providers.base import merge_fetch_cache_slots
+    on_disk = {"gasbuddy:191273:regular": {"data": {"state": 165.9}, "fetched_at": 1.0}}
+    incoming = {"affordableenergy_ca:toronto": {"data": {"state": 1.0}, "fetched_at": 2.0}}
+    merged = merge_fetch_cache_slots(dict(on_disk), incoming)
+    assert merged["gasbuddy:191273:regular"]["data"]["state"] == 165.9
+    assert merged["affordableenergy_ca:toronto"]["data"]["state"] == 1.0
+
+
+def test_merge_fetch_cache_slots_incoming_wins_on_overlap():
+    """Only the owning entry ever writes its own provider keys, and its
+    in-memory snapshot is always the freshest for those keys."""
+    from sfp_providers.base import merge_fetch_cache_slots
+    on_disk = {"gasbuddy:191273:regular": {"data": {"state": 160.0}, "fetched_at": 1.0}}
+    incoming = {"gasbuddy:191273:regular": {"data": {"state": 165.9}, "fetched_at": 2.0}}
+    merged = merge_fetch_cache_slots(dict(on_disk), incoming)
+    assert merged["gasbuddy:191273:regular"]["data"]["state"] == 165.9
+
 # 追加到 tests/test_providers.py
 
 def test_all_provider_modules_import_cleanly():
