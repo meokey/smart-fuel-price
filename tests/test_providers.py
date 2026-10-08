@@ -14,13 +14,19 @@ from sfp_providers.citynews_ca import CityNewsCaProvider
 from sfp_providers.gasbuddy_ca import GasBuddyStationProvider
 
 class FakeResponse:
-    def __init__(self, text, status_code=200):
+    def __init__(self, text, status_code=200, json_data=None):
         self.text = text
         self.status_code = status_code
+        self._json_data = json_data
 
     def raise_for_status(self):
         if self.status_code >= 400:
             raise requests.exceptions.HTTPError(str(self.status_code))
+
+    def json(self):
+        if self._json_data is None:
+            raise ValueError("No JSON here")
+        return self._json_data
 
 
 class FakeSession:
@@ -204,66 +210,89 @@ def test_gaswizard_forecast_not_published_yet(caplog):
         and r.levelno >= logging.WARNING
     ]
 
-GASBUDDY_STATION_JSON = {
-    "station": {
-        "Name": "Costco",
-        "Address": "90 Windfields Farm Dr E",
-        "City": "Oshawa",
-        "State": "ON",
-        "ZipCode": "L1H 0A1",
-        "Lat": 43.94,
-        "Lng": -78.83,
-        "APIFuel": [
-            {"Id": 1, "Available": True, "DisplayName": "Regular"},
-            {"Id": 2, "Available": True, "DisplayName": "Premium"},
-        ],
-        "Fuels": [
-            {"FuelType": 1, "CreditPrice": {"Amount": 164.9, "TimePosted": "/Date(1758931200000)/"}},
-            {"FuelType": 2, "CreditPrice": {"Amount": 179.9, "TimePosted": "/Date(1758931200000)/"}},
-        ],
-    }
+GASBUDDY_HOME_HTML = (
+    '<html><head><script>window.gbcsrf = "tok123";</script></head></html>'
+)
+
+GASBUDDY_GRAPHQL_STATION = {
+    "id": "205748",
+    "name": "Costco",
+    "phone": "905-555-0100",
+    "priceUnit": "¢/L",
+    "currency": "CAD",
+    "latitude": 43.94,
+    "longitude": -78.83,
+    "address": {
+        "line1": "90 Windfields Farm Dr E",
+        "line2": None,
+        "locality": "Oshawa",
+        "region": "ON",
+        "postalCode": "L1H 0A1",
+        "country": "CA",
+    },
+    "prices": [
+        {"fuelProduct": "regular_gas", "longName": "Regular (85-87 Octane)",
+         "credit": {"price": 164.9, "formattedPrice": "164.9",
+                    "postedTime": "2026-10-07T18:30:00Z", "nickname": "member"},
+         "cash": {"price": 164.9, "formattedPrice": "164.9",
+                  "postedTime": "2026-10-07T18:30:00Z", "nickname": "member"}},
+        {"fuelProduct": "premium_gas", "longName": "Premium (91-93 Octane)",
+         "credit": {"price": 179.9, "formattedPrice": "179.9",
+                    "postedTime": "2026-10-07T18:30:00Z", "nickname": "member"},
+         "cash": {"price": 179.9, "formattedPrice": "179.9",
+                  "postedTime": "2026-10-07T18:30:00Z", "nickname": "member"}},
+    ],
 }
 
 
-class FakePostSession(FakeSession):
-    """Extends FakeSession with a matching POST, for GasBuddy's endpoint."""
+class FakeGasBuddySession(FakeSession):
+    """Fakes GasBuddy's GraphQL flow: GET /home (CSRF token) + POST /graphql."""
 
-    def __init__(self, json_response):
+    def __init__(self, station=None, post_status=200, post_responses=None):
         super().__init__({})
-        self.json_response = json_response
-        self.posted_with = None
-        self.post_count = 0  # 新增
+        self.station = station
+        self.post_status = post_status
+        # Optional per-call script: list of (status, json) for the POST.
+        self.post_responses = list(post_responses or [])
+        self.get_count = 0
+        self.post_count = 0
+        self.posted_with = None  # (url, json, headers)
 
-    def post(self, url, data=None, **kwargs):
-        self.post_count += 1  # 新增
-        self.posted_with = (url, data)
-        resp = FakeResponse("")
-        resp.json = lambda: self.json_response
-        return resp
+    def get(self, url, **kwargs):
+        self.get_count += 1
+        return FakeResponse(GASBUDDY_HOME_HTML)
+
+    def post(self, url, json=None, **kwargs):
+        self.post_count += 1
+        self.posted_with = (url, json, kwargs.get("headers"))
+        if self.post_responses:
+            status, body = self.post_responses.pop(0)
+            return FakeResponse("", status_code=status, json_data=body)
+        return FakeResponse(
+            "", status_code=self.post_status,
+            json_data={"data": {"station": self.station}},
+        )
 
 @pytest.fixture(autouse=True)
 def _clear_gasbuddy_station_cache():
     GasBuddyStationProvider._clear_station_cache()
     yield
 def test_gasbuddy_shares_one_fetch_across_grades_for_same_station():
-    session = FakePostSession(GASBUDDY_STATION_JSON)
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
     GasBuddyStationProvider("205748", "regular", session=session).fetch_data()
     GasBuddyStationProvider("205748", "premium", session=session).fetch_data()
     assert session.post_count == 1  # 同一站点，第二次该吃缓存
+    assert session.get_count == 1  # CSRF token 也只取一次
 
 
 def test_gasbuddy_rate_limited_fails_soft():
-    class _RateLimitedSession(FakePostSession):
-        def post(self, url, data=None, **kwargs):
-            self.post_count += 1
-            return FakeResponse("", status_code=429)
-
-    session = _RateLimitedSession({})
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION, post_status=429)
     data = GasBuddyStationProvider("205748", session=session).fetch_data()
     assert data["is_valid"] is False
 
+
 def test_gasbuddy_station_end_to_end():
-    session = FakePostSession(GASBUDDY_STATION_JSON)
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
     data = GasBuddyStationProvider("205748", session=session).fetch_data()
 
     assert data["is_valid"] is True
@@ -272,19 +301,25 @@ def test_gasbuddy_station_end_to_end():
     assert data["tomorrow_price"] is None
     assert data["station_name"] == "Costco"
     assert data["city"] == "Oshawa"
-    assert session.posted_with == (
-        "https://www.gasbuddy.com/gaspricemap/station",
-        {"id": "205748", "fuelTypeId": "1"},
-    )
+    assert data["phone"] == "905-555-0100"
+    assert data["latitude"] == pytest.approx(43.94)
+    assert data["longitude"] == pytest.approx(-78.83)
+
+    url, payload, headers = session.posted_with
+    assert url == "https://www.gasbuddy.com/graphql"
+    assert payload["operationName"] == "GetStation"
+    assert payload["variables"] == {"id": "205748"}
+    assert "GetStation" in payload["query"]
+    assert headers["gbcsrf"] == "tok123"
 
 
 def test_gasbuddy_amount_reported_as_cents_per_litre():
-    """Amount is already in cents/L (e.g. 168.9) -- pass it through raw
+    """Price is already in cents/L (e.g. 168.9) -- pass it through raw
     with the \u00a2/L unit; never divide."""
     import copy
-    payload = copy.deepcopy(GASBUDDY_STATION_JSON)
-    payload["station"]["Fuels"][0]["CreditPrice"]["Amount"] = 168.9
-    session = FakePostSession(payload)
+    station = copy.deepcopy(GASBUDDY_GRAPHQL_STATION)
+    station["prices"][0]["credit"]["price"] = 168.9
+    session = FakeGasBuddySession(station)
     provider = GasBuddyStationProvider("205748", session=session)
     data = provider.fetch_data()
 
@@ -295,16 +330,55 @@ def test_gasbuddy_amount_reported_as_cents_per_litre():
 
 
 def test_gasbuddy_missing_station_fails_soft():
-    session = FakePostSession({"station": None})
+    session = FakeGasBuddySession(None)
     data = GasBuddyStationProvider("999999", session=session).fetch_data()
     assert data["is_valid"] is False
+
+
+def test_gasbuddy_graphql_errors_fail_soft():
+    session = FakeGasBuddySession(
+        GASBUDDY_GRAPHQL_STATION,
+        post_responses=[(200, {"errors": [{"message": "boom"}]})],
+    )
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+    assert data["is_valid"] is False
+
+
+def test_gasbuddy_missing_grade_fails_soft():
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)  # regular + premium only
+    data = GasBuddyStationProvider("205748", "diesel", session=session).fetch_data()
+    assert data["is_valid"] is False
+
+
+def test_gasbuddy_refreshes_stale_token_on_403_then_succeeds():
+    """A 403 on the first POST drops the CSRF token and retries once
+    with a fresh one -- the Cloudflare-challenge recovery path."""
+    session = FakeGasBuddySession(
+        GASBUDDY_GRAPHQL_STATION,
+        post_responses=[
+            (403, None),
+            (200, {"data": {"station": GASBUDDY_GRAPHQL_STATION}}),
+        ],
+    )
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+    assert data["is_valid"] is True
+    assert data["state"] == pytest.approx(164.9)
+    assert session.post_count == 2
+    assert session.get_count == 2  # token refetched after the 403
+
+
+def test_gasbuddy_csrf_token_extraction():
+    from sfp_providers.gasbuddy_ca import _extract_csrf_token
+    assert _extract_csrf_token(GASBUDDY_HOME_HTML) == "tok123"
+    assert _extract_csrf_token("<html>no token here</html>") is None
+    assert _extract_csrf_token("") is None
 
 
 def test_gasbuddy_force_refresh_bypasses_shared_station_cache():
     """Manual refresh must hit the network even when the shared
     per-station JSON cache is still warm -- otherwise the refresh button
     is a no-op for up to 20 minutes."""
-    session = FakePostSession(GASBUDDY_STATION_JSON)
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
     provider = GasBuddyStationProvider("205748", session=session)
     provider.get_data()  # warms both the TTL cache and the shared station cache
     assert session.post_count == 1
@@ -317,7 +391,7 @@ def test_gasbuddy_force_refresh_bypasses_shared_station_cache():
 
 
 def test_check_station_grades_all_offered():
-    session = FakePostSession(GASBUDDY_STATION_JSON)
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
     provider = GasBuddyStationProvider("205748", "regular", session=session)
     valid, missing = provider.check_station_grades(["regular", "premium"])
     assert valid is True
@@ -326,7 +400,7 @@ def test_check_station_grades_all_offered():
 
 
 def test_check_station_grades_reports_missing_grade():
-    session = FakePostSession(GASBUDDY_STATION_JSON)  # only Regular + Premium
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)  # regular + premium only
     provider = GasBuddyStationProvider("205748", "regular", session=session)
     valid, missing = provider.check_station_grades(["regular", "diesel"])
     assert valid is True
@@ -334,7 +408,7 @@ def test_check_station_grades_reports_missing_grade():
 
 
 def test_check_station_grades_invalid_station():
-    session = FakePostSession({"station": None})
+    session = FakeGasBuddySession(None)
     provider = GasBuddyStationProvider("999999", "regular", session=session)
     valid, missing = provider.check_station_grades(["regular"])
     assert valid is False
@@ -345,7 +419,7 @@ def test_cache_hit_marks_status_ok_not_unknown():
     (no network attempt), which used to leave last_fetch_status None -- so
     the per-device "Update status" sensor sat at Unknown indefinitely
     (seen live next to a healthy "Last updated")."""
-    session = FakePostSession(GASBUDDY_STATION_JSON)
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
     provider = GasBuddyStationProvider("205748", session=session)
     provider.get_data()  # real fetch
     assert session.post_count == 1
@@ -505,19 +579,19 @@ def test_gaswizard_does_not_serve_stale_forecast():
 
 
 def test_gasbuddy_serves_stale_price_on_rate_limit():
-    session = FakePostSession(GASBUDDY_STATION_JSON)
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
     provider = GasBuddyStationProvider("205748", "regular", session=session)
     provider.cache_ttl = timedelta(minutes=30)
     first = provider.get_data()
     assert first["is_valid"] is True
     assert first["state"] == pytest.approx(164.9)
 
-    class _RateLimitedSession(FakePostSession):
-        def post(self, url, data=None, **kwargs):
+    class _RateLimitedSession(FakeGasBuddySession):
+        def post(self, url, json=None, **kwargs):
             self.post_count += 1
             return FakeResponse("", status_code=429)
 
-    provider._session = _RateLimitedSession({})
+    provider._session = _RateLimitedSession(None)
     GasBuddyStationProvider._clear_station_cache()  # force the POST to run
     provider._last_attempt_at = None
     second = provider.get_data()
@@ -533,12 +607,12 @@ def test_fetch_status_rate_limited(status_code):
     from generic failures, and the internal flag never leaks into the
     payload that becomes entity attributes."""
 
-    class _LimitedSession(FakePostSession):
-        def post(self, url, data=None, **kwargs):
+    class _LimitedSession(FakeGasBuddySession):
+        def post(self, url, json=None, **kwargs):
             return FakeResponse("", status_code=status_code)
 
     GasBuddyStationProvider._clear_station_cache()
-    provider = GasBuddyStationProvider("205748", session=_LimitedSession({}))
+    provider = GasBuddyStationProvider("205748", session=_LimitedSession(None))
     provider.cache_ttl = timedelta(minutes=30)
     data = provider.get_data(force_refresh=True)
     assert data["is_valid"] is False
@@ -549,7 +623,7 @@ def test_fetch_status_rate_limited(status_code):
 def test_fetch_status_ok_on_success():
     GasBuddyStationProvider._clear_station_cache()
     provider = GasBuddyStationProvider(
-        "205748", session=FakePostSession(GASBUDDY_STATION_JSON)
+        "205748", session=FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
     )
     assert provider.last_fetch_status is None  # no attempt yet
     data = provider.get_data(force_refresh=True)
@@ -558,12 +632,12 @@ def test_fetch_status_ok_on_success():
 
 
 def test_fetch_status_error_on_server_error():
-    class _BrokenSession(FakePostSession):
-        def post(self, url, data=None, **kwargs):
+    class _BrokenSession(FakeGasBuddySession):
+        def post(self, url, json=None, **kwargs):
             return FakeResponse("", status_code=500)
 
     GasBuddyStationProvider._clear_station_cache()
-    provider = GasBuddyStationProvider("205748", session=_BrokenSession({}))
+    provider = GasBuddyStationProvider("205748", session=_BrokenSession(None))
     provider.cache_ttl = timedelta(minutes=30)
     data = provider.get_data(force_refresh=True)
     assert data["is_valid"] is False
@@ -574,12 +648,12 @@ def test_rate_limited_records_whether_forced():
     """The threshold-hint is only shown for *automatic* polls -- a manual
     press that hits the limit needs no such suggestion."""
 
-    class _LimitedSession(FakePostSession):
-        def post(self, url, data=None, **kwargs):
+    class _LimitedSession(FakeGasBuddySession):
+        def post(self, url, json=None, **kwargs):
             return FakeResponse("", status_code=429)
 
     GasBuddyStationProvider._clear_station_cache()
-    provider = GasBuddyStationProvider("205748", session=_LimitedSession({}))
+    provider = GasBuddyStationProvider("205748", session=_LimitedSession(None))
     provider.cache_ttl = timedelta(minutes=30)
 
     provider.get_data(force_refresh=True)
@@ -660,7 +734,7 @@ def test_fresh_cache_slot_only_for_real_fetches():
     """The persist rule shared by setup-preview and sensor updates."""
     from sfp_providers.base import fresh_cache_slot
 
-    provider = GasBuddyStationProvider("205748", session=FakePostSession(GASBUDDY_STATION_JSON))
+    provider = GasBuddyStationProvider("205748", session=FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION))
     before = datetime.now(timezone.utc).timestamp()
     slot = fresh_cache_slot(provider, {"is_valid": True, "state": 164.9})
     assert slot is not None
@@ -676,7 +750,7 @@ def test_fresh_cache_slot_only_for_real_fetches():
 
 def test_last_successful_fetch_tracks_fetches():
     """Drives the per-device "Last updated" timestamp sensor."""
-    session = FakePostSession(GASBUDDY_STATION_JSON)
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
     provider = GasBuddyStationProvider("205748", session=session)
     assert provider.last_successful_fetch is None
 
@@ -694,7 +768,7 @@ def test_last_successful_fetch_tracks_fetches():
 
 def test_last_successful_fetch_restored_from_persisted_cache():
     """After a restart, "Last updated" shows the persisted fetch time."""
-    provider = GasBuddyStationProvider("205748", session=FakePostSession({}))
+    provider = GasBuddyStationProvider("205748", session=FakeGasBuddySession(None))
     ts = datetime(2026, 10, 7, 7, 30, tzinfo=timezone.utc)
     provider.hydrate_cache({"is_valid": True}, ts)
     assert provider.last_successful_fetch == ts

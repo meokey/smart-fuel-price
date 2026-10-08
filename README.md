@@ -185,9 +185,13 @@ Note: GasBuddy reports Canadian prices in cents per litre (e.g. `168.9`
 \u00a2/L). The value is shown as-is with the `\u00a2/L` unit, consistent
 with the other sensors and with how prices are quoted on Canadian pumps.
 
-*Station price data is retrieved via an endpoint documented by the
-[Red5d/ha-gasbuddy](https://github.com/Red5d/ha-gasbuddy) project —
-thanks to Red5d and contributors for that groundwork.*
+*Station price data is retrieved via GasBuddy's official GraphQL API.
+Thanks to [firstof9/py-gasbuddy](https://github.com/firstof9/py-gasbuddy)
+and [firstof9/ha-gasbuddy](https://github.com/firstof9/ha-gasbuddy)
+(both MIT) for reverse-engineering the API and the CSRF-token flow —
+earlier versions used an endpoint documented by the
+[Red5d/ha-gasbuddy](https://github.com/Red5d/ha-gasbuddy) project, thanks
+to Red5d and contributors for that groundwork.*
 
 ## Upgrading to v2.3.6+
 
