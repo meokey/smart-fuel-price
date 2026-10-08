@@ -1,4 +1,5 @@
 """Sensor platform for Smart Fuel Price (Config Flow enabled)."""
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -17,7 +18,7 @@ from .const import (
     CONF_CACHE_TTL_MINUTES,
     DEFAULT_CACHE_TTL_MINUTES,
 )
-from .providers.base import fresh_cache_slot, summarize_fetch_status
+from .providers.base import fresh_cache_slot, merge_fetch_cache_slots, summarize_fetch_status
 
 # Device "model" shown on the HA device info card: what KIND of data this
 # device carries, at a glance (station live price vs city forecast).
@@ -43,32 +44,64 @@ _FETCH_CACHE_VERSION = 2
 _FETCH_CACHE_KEY = f"{DOMAIN}_fetch_cache"
 
 
+def _cache_lock(hass) -> asyncio.Lock:
+    """Process-wide lock serializing fetch-cache storage access.
+
+    Every config entry loads the cache once at setup, then saves its own
+    snapshot on its own poll schedule. Without serialization, the
+    load-merge-save in _save_fetch_cache could interleave across entries.
+    """
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    lock = domain_data.get("fetch_cache_lock")
+    if lock is None:
+        lock = asyncio.Lock()
+        domain_data["fetch_cache_lock"] = lock
+    return lock
+
+
 async def _load_fetch_cache(hass) -> dict:
     """Load the persisted fetch cache ({cache_key: {data, fetched_at}})."""
     try:
-        return await Store(hass, _FETCH_CACHE_VERSION, _FETCH_CACHE_KEY).async_load() or {}
+        async with _cache_lock(hass):
+            return await Store(hass, _FETCH_CACHE_VERSION, _FETCH_CACHE_KEY).async_load() or {}
     except Exception as err:  # noqa: BLE001 -- cache is best-effort
         _LOGGER.debug("Could not load fetch cache: %s", err)
         return {}
 
 
 async def _save_fetch_cache(hass, fetch_cache: dict) -> None:
-    """Persist the fetch cache. Best-effort -- never breaks updates."""
+    """Persist the fetch cache, merging into what's already on disk.
+
+    Best-effort -- never breaks updates. The merge (not a full overwrite)
+    is what makes this safe across config entries: each entry only ever
+    adds/refreshes its own providers' slots, so a save can never delete
+    another entry's slots (see merge_fetch_cache_slots).
+    """
     try:
-        await Store(hass, _FETCH_CACHE_VERSION, _FETCH_CACHE_KEY).async_save(fetch_cache)
+        async with _cache_lock(hass):
+            store = Store(hass, _FETCH_CACHE_VERSION, _FETCH_CACHE_KEY)
+            current = await store.async_load() or {}
+            await store.async_save(merge_fetch_cache_slots(current, fetch_cache))
     except Exception as err:  # noqa: BLE001 -- cache is best-effort
-        _LOGGER.debug("Could not persist fetch cache: %s", err)
+        # Warning, not debug: a persist failure is silent data loss -- the
+        # cache won't survive the next restart, and nothing else signals it.
+        _LOGGER.warning("Could not persist fetch cache: %s", err)
 
 
 def _hydrate_provider(provider, fetch_cache: dict) -> None:
     """Restore a provider's in-memory cache from the persisted store."""
     slot = fetch_cache.get(provider.cache_key)
     if not slot or not slot.get("data"):
+        _LOGGER.debug(
+            "No persisted fetch-cache slot for %s; starting cold", provider.cache_key
+        )
         return
     try:
-        provider.hydrate_cache(
-            slot["data"],
-            datetime.fromtimestamp(slot["fetched_at"], tz=timezone.utc),
+        fetched_at = datetime.fromtimestamp(slot["fetched_at"], tz=timezone.utc)
+        provider.hydrate_cache(slot["data"], fetched_at)
+        _LOGGER.info(
+            "Restored fetch cache for %s (data from %s)",
+            provider.cache_key, fetched_at.isoformat(),
         )
     except Exception as err:  # noqa: BLE001 -- corrupt slot, just skip it
         _LOGGER.debug("Ignoring corrupt fetch-cache slot %s: %s", provider.cache_key, err)
