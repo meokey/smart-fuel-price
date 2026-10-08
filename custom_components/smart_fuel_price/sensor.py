@@ -25,10 +25,8 @@ _DEVICE_MODEL = {
     "gasbuddy_ca": "Gas station",
     "affordableenergy_ca": "City fuel forecast",
     "citynews_ca": "City fuel price",
-    "fuelwise_app": "City fuel price",
 }
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
-from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
 from .providers.gasbuddy_ca import GasBuddyStationProvider
 
@@ -196,12 +194,19 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         return
     city = city.lower()
 
-    if provider_type == "fuelwise_app":
-        provider = FuelwiseAppProvider(city)
-    elif provider_type == "citynews_ca":
+    if provider_type == "citynews_ca":
         provider = CityNewsCaProvider(city)
-    else:
+    elif provider_type == "affordableenergy_ca":
         provider = AffordableEnergyCaProvider(city)
+    else:
+        # No silent fallback: an unknown (or removed, e.g. fuelwise_app)
+        # provider string must fail loudly, not masquerade as Gas Wizard.
+        _LOGGER.error(
+            "Config entry %s uses unknown provider '%s'; skipping setup",
+            config_entry.entry_id,
+            provider_key,
+        )
+        return
     provider.cache_ttl = ttl
     _hydrate_provider(provider, fetch_cache)
 

@@ -299,6 +299,46 @@ def test_gasbuddy_missing_station_fails_soft():
     data = GasBuddyStationProvider("999999", session=session).fetch_data()
     assert data["is_valid"] is False
 
+
+def test_gasbuddy_force_refresh_bypasses_shared_station_cache():
+    """Manual refresh must hit the network even when the shared
+    per-station JSON cache is still warm -- otherwise the refresh button
+    is a no-op for up to 20 minutes."""
+    session = FakePostSession(GASBUDDY_STATION_JSON)
+    provider = GasBuddyStationProvider("205748", session=session)
+    provider.get_data()  # warms both the TTL cache and the shared station cache
+    assert session.post_count == 1
+
+    provider.get_data()  # TTL cache hit -- no network
+    assert session.post_count == 1
+
+    provider.get_data(force_refresh=True)  # must bypass BOTH cache layers
+    assert session.post_count == 2
+
+
+def test_check_station_grades_all_offered():
+    session = FakePostSession(GASBUDDY_STATION_JSON)
+    provider = GasBuddyStationProvider("205748", "regular", session=session)
+    valid, missing = provider.check_station_grades(["regular", "premium"])
+    assert valid is True
+    assert missing == []
+    assert session.post_count == 1  # one request covers all grades
+
+
+def test_check_station_grades_reports_missing_grade():
+    session = FakePostSession(GASBUDDY_STATION_JSON)  # only Regular + Premium
+    provider = GasBuddyStationProvider("205748", "regular", session=session)
+    valid, missing = provider.check_station_grades(["regular", "diesel"])
+    assert valid is True
+    assert missing == ["diesel"]
+
+
+def test_check_station_grades_invalid_station():
+    session = FakePostSession({"station": None})
+    provider = GasBuddyStationProvider("999999", "regular", session=session)
+    valid, missing = provider.check_station_grades(["regular"])
+    assert valid is False
+
 # 追加到 tests/test_providers.py
 
 def test_all_provider_modules_import_cleanly():
@@ -309,7 +349,7 @@ def test_all_provider_modules_import_cleanly():
     import importlib
     for module_name in (
         "base", "vendor_widgets", "citynews_ca",
-        "affordableenergy_ca", "gasbuddy_ca", "fuelwise_app",
+        "affordableenergy_ca", "gasbuddy_ca",
     ):
         importlib.import_module(f"sfp_providers.{module_name}")
 

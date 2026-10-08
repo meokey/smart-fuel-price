@@ -17,7 +17,6 @@ DEFAULT_CACHE_TTL_MINUTES = {
     "affordableenergy_ca": 240,
     "citynews_ca": 240,
     "gasbuddy_ca": 30,
-    "fuelwise_app": 240,
 }
 
 CONF_FUEL_GRADES = "fuel_grades"
@@ -31,7 +30,6 @@ GASBUDDY_FUEL_GRADES = {
 # List of available providers (Factory mapping will happen in sensor.py)
 AVAILABLE_PROVIDERS = {
     "affordableenergy_ca": "Canada (Gas Wizard)",
-#    "fuelwise_app": "Ontario / GTA (Fuelwise)",
     "citynews_ca": "Canada (CityNews)",
     "gasbuddy_ca": "GasBuddy (Station)"
 }

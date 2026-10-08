@@ -26,7 +26,6 @@ from .const import (
     OPTIONAL_ATTRIBUTES,
 )
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
-from .providers.fuelwise_app import FuelwiseAppProvider
 from .providers.citynews_ca import CityNewsCaProvider
 from .providers.gasbuddy_ca import GasBuddyStationProvider
 
@@ -34,7 +33,6 @@ _LOGGER = logging.getLogger(__name__)
 
 _PROVIDER_CLASSES = {
     "citynews_ca": CityNewsCaProvider,
-    "fuelwise_app": FuelwiseAppProvider,
     "affordableenergy_ca": AffordableEnergyCaProvider,
     # gasbuddy_ca deliberately excluded: it's station-based, not
     # city-based, and has no get_supported_cities()/discover_cities().
@@ -68,10 +66,16 @@ async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
     return cities or provider_cls.get_supported_cities()
 
 
-async def _validate_station_id(hass, station_id: str, fuel_grade: str) -> bool:
-    provider = GasBuddyStationProvider(station_id, fuel_grade)
-    result = await hass.async_add_executor_job(provider.fetch_data)
-    return bool(result.get("is_valid"))
+async def _validate_station(
+    hass, station_id: str, fuel_grades: list[str]
+) -> tuple[bool, list[str]]:
+    """Validate a station ID plus every selected grade, with one request.
+
+    Returns (station_valid, missing_grades) -- see
+    GasBuddyStationProvider.check_station_grades.
+    """
+    provider = GasBuddyStationProvider(station_id, fuel_grades[0])
+    return await hass.async_add_executor_job(provider.check_station_grades, fuel_grades)
 
 
 class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -117,6 +121,7 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_details(self, user_input=None):
         """Step 2: provider-specific fields (city, or station IDs for GasBuddy)."""
         errors = {}
+        missing_grades = ""
         provider_key = self._selected_provider
 
         if user_input is not None:
@@ -130,17 +135,24 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 elif not fuel_grades:
                     errors["base"] = "fuel_grade_required"
                 else:
-                    # Validate every station ID live so a typo is caught
-                    # now, not silently at the first sensor poll. Only
-                    # checks the first selected grade per station -- a
-                    # station missing ONE of several selected grades
-                    # still passes here and simply reports is_valid=False
-                    # for that specific (station, grade) sensor later.
+                    # Validate every (station, grade) live so a typo is
+                    # caught now, not silently at the first sensor poll.
+                    # One request per station covers all its grades (the
+                    # payload already contains every fuel the station
+                    # offers).
                     results = await asyncio.gather(
-                        *(_validate_station_id(self.hass, s, fuel_grades[0]) for s in station_ids)
+                        *(_validate_station(self.hass, s, fuel_grades) for s in station_ids)
                     )
-                    if not all(results):
+                    if not all(valid for valid, _ in results):
                         errors["base"] = "invalid_station_id"
+                    else:
+                        missing_grades = "; ".join(
+                            f"{sid} ({', '.join(grades)})"
+                            for sid, (_, grades) in zip(station_ids, results)
+                            if grades
+                        )
+                        if missing_grades:
+                            errors["base"] = "unsupported_fuel_grade"
 
                 if not errors:
                     unique_id = f"gasbuddy_ca_{'_'.join(sorted(station_ids))}_{'_'.join(sorted(fuel_grades))}"
@@ -188,7 +200,10 @@ class SmartFuelPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="details",
             data_schema=schema,
             errors=errors,
-            description_placeholders={"provider": AVAILABLE_PROVIDERS.get(provider_key, provider_key)},
+            description_placeholders={
+                "provider": AVAILABLE_PROVIDERS.get(provider_key, provider_key),
+                "grades": missing_grades,
+            },
         )
 
     @staticmethod
