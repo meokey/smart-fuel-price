@@ -339,6 +339,27 @@ def test_check_station_grades_invalid_station():
     valid, missing = provider.check_station_grades(["regular"])
     assert valid is False
 
+
+def test_cache_hit_marks_status_ok_not_unknown():
+    """Regression: in steady state every poll is served from the TTL cache
+    (no network attempt), which used to leave last_fetch_status None -- so
+    the per-device "Update status" sensor sat at Unknown indefinitely
+    (seen live next to a healthy "Last updated")."""
+    session = FakePostSession(GASBUDDY_STATION_JSON)
+    provider = GasBuddyStationProvider("205748", session=session)
+    provider.get_data()  # real fetch
+    assert session.post_count == 1
+
+    # Simulate "after a restart": status unknown, cache hydrated and fresh.
+    provider._last_fetch_status = None
+    provider._last_attempt_at = datetime.now(timezone.utc)
+
+    data = provider.get_data()
+    assert data["from_cache"] is True
+    assert session.post_count == 1  # no network attempt...
+    assert provider.last_fetch_status == "ok"  # ...but the serving was healthy
+    assert provider.last_fetch_was_forced is False
+
 # 追加到 tests/test_providers.py
 
 def test_all_provider_modules_import_cleanly():

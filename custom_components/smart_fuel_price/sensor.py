@@ -285,24 +285,27 @@ class SmartFuelLastUpdatedSensor(SensorEntity):
             suggested_area=suggested_area,
             configuration_url=configuration_url,
         )
-        self._last_updated = None
 
     @property
     def native_value(self):
-        """Latest successful fetch across this device's providers."""
-        return self._last_updated
+        """Latest successful fetch across this device's providers.
 
-    async def async_update(self):
-        """Recompute from the providers' last-successful-fetch stamps.
-
-        No I/O here -- the providers are polled through the regular price
-        sensors on the same SCAN_INTERVAL; this just surfaces their stamp.
+        Computed live, not snapshotted in async_update: at setup the
+        platforms' first updates can complete in any order, and a slow
+        provider's fetch may not have landed when this sensor first
+        updates -- reading the stamps live means the value is correct as
+        soon as any fetch succeeds, instead of being stuck at Unknown.
         """
         stamps = [
             p.last_successful_fetch for p in self._providers
             if p.last_successful_fetch is not None
         ]
-        self._last_updated = max(stamps) if stamps else None
+        return max(stamps) if stamps else None
+
+    async def async_update(self):
+        """No I/O -- the value is read live from the providers (see
+        native_value). The providers themselves are polled through the
+        regular price sensors on the same SCAN_INTERVAL."""
 
 
 class SmartFuelUpdateStatusSensor(SensorEntity):

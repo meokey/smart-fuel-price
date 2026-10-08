@@ -283,6 +283,14 @@ class BaseFuelPriceProvider(ABC):
             and self._last_attempt_at is not None
             and now - self._last_attempt_at < ttl
         ):
+            # Serving valid cached data counts as a healthy serving: without
+            # this the "Update status" sensor would sit at Unknown for the
+            # whole TTL window -- which is the normal steady state, since a
+            # cache hit by design makes no network attempt that could set
+            # the status. (Seen live: "Last updated 5 hours ago" next to
+            # "Update status Unknown".)
+            self._last_fetch_status = "ok"
+            self._last_fetch_was_forced = False
             cached = dict(self._cached_data)
             cached["from_cache"] = True
             return cached
