@@ -94,6 +94,23 @@ def _parse_dotnet_date(value: str | None) -> str | None:
     return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).isoformat()
 
 
+def _find_fuel(station: dict[str, Any], fuel_grade: str) -> dict[str, Any] | None:
+    """Return the station's Fuels entry matching fuel_grade, or None."""
+    fuel_names = {
+        str(fuel["Id"]): fuel["DisplayName"]
+        for fuel in station.get("APIFuel", [])
+        if fuel.get("Available")
+    }
+    wanted_aliases = _GRADE_ALIASES.get(fuel_grade, {fuel_grade})
+    return next(
+        (
+            fuel for fuel in station.get("Fuels", [])
+            if _normalize_grade(fuel_names.get(str(fuel.get("FuelType")), "")) in wanted_aliases
+        ),
+        None,
+    )
+
+
 class GasBuddyStationProvider(BaseFuelPriceProvider):
     """Provider for a single GasBuddy station + fuel grade.
 
@@ -108,6 +125,14 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
     # docstring. {station_id: (fetched_at_epoch, raw_json)}
     _station_cache: dict[str, tuple[float, dict]] = {}
     _CACHE_TTL_SECONDS = 20 * 60  # a bit under the 30-min scan_interval
+
+    # Set while a forced (manual) refresh is in flight: _fetch_station_json
+    # must then skip the shared class-level cache too, or "Manual refresh"
+    # would keep serving the cached payload for up to 20 minutes without
+    # ever hitting the network. Per-instance flag; base.get_data() holds
+    # this instance's lock across check-and-fetch, so it can't leak
+    # across concurrent calls on the same instance.
+    _force_station_fetch = False
 
     # Live per-station prices: serving the last known price on a failed
     # fetch (rate-limit etc.) beats showing unknown.
@@ -156,14 +181,50 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
         # station's page (name, address, community prices).
         return f"https://www.gasbuddy.com/station/{self.station_id}"
 
+    def get_data(self, force_refresh: bool = False) -> dict[str, Any]:
+        """Return fuel data; a forced refresh bypasses BOTH cache layers.
+
+        The base implementation only skips the per-instance TTL cache --
+        without this override the shared per-station JSON cache
+        (``_station_cache``) would still be served for up to 20 minutes,
+        making "Manual refresh" a no-op network-wise.
+        """
+        self._force_station_fetch = force_refresh
+        try:
+            return super().get_data(force_refresh)
+        finally:
+            self._force_station_fetch = False
+
+    def check_station_grades(self, fuel_grades: list[str]) -> tuple[bool, list[str]]:
+        """Validate a station ID and grade selection with a single fetch.
+
+        Returns ``(station_valid, missing_grades)``: ``station_valid`` is
+        False when the station itself can't be resolved (bad ID, or a
+        rate-limit/bot-block meant the payload couldn't be confirmed);
+        otherwise ``missing_grades`` lists the selected grades this
+        station doesn't offer. Used by the config flow so a typo'd grade
+        is caught at setup time, not at the first sensor poll.
+        """
+        try:
+            payload = self._fetch_station_json()
+        except RateLimitedError as err:
+            _LOGGER.info("[%s] Station check rate-limited, treating as unconfirmed: %s", self.name, err)
+            return False, list(fuel_grades)
+        station = (payload or {}).get("station")
+        if not station:
+            return False, list(fuel_grades)
+        missing = [g for g in fuel_grades if _find_fuel(station, g) is None]
+        return True, missing
+
     def _fetch_station_json(self) -> dict[str, Any] | None:
         """Fetch (or reuse a recent cached copy of) this station's full
         JSON payload. Returns None on any failure (bad response, rate
         limit, non-JSON) -- callers treat that as is_valid: False."""
         now = time.time()
-        cached = GasBuddyStationProvider._station_cache.get(self.station_id)
-        if cached and (now - cached[0]) < self._CACHE_TTL_SECONDS:
-            return cached[1]
+        if not self._force_station_fetch:
+            cached = GasBuddyStationProvider._station_cache.get(self.station_id)
+            if cached and (now - cached[0]) < self._CACHE_TTL_SECONDS:
+                return cached[1]
 
         # Prime the session the way a real browser would (load the map
         # page, which sets any cookies the API call might expect) before
@@ -220,26 +281,18 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
             )
             return {"is_valid": False}
 
-        fuel_names = {
-            str(fuel["Id"]): fuel["DisplayName"]
-            for fuel in station.get("APIFuel", [])
-            if fuel.get("Available")
-        }
-
-        wanted_aliases = _GRADE_ALIASES.get(self.fuel_grade, {self.fuel_grade})
-        matched_fuel = next(
-            (
-                fuel for fuel in station.get("Fuels", [])
-                if _normalize_grade(fuel_names.get(str(fuel.get("FuelType")), "")) in wanted_aliases
-            ),
-            None,
-        )
+        matched_fuel = _find_fuel(station, self.fuel_grade)
         if matched_fuel is None:
+            available = [
+                fuel["DisplayName"]
+                for fuel in station.get("APIFuel", [])
+                if fuel.get("Available")
+            ]
             _LOGGER.warning(
                 "[%s] Station '%s' (%s) has no '%s' fuel grade available. "
                 "Available grades: %s",
                 self.name, self.station_id, station.get("Name", "?"),
-                self.fuel_grade, list(fuel_names.values()),
+                self.fuel_grade, available,
             )
             return {"is_valid": False}
 

@@ -23,6 +23,7 @@
       "station_ids_required": "Enter at least one GasBuddy station ID.",
       "fuel_grade_required": "Select at least one fuel grade.",
       "invalid_station_id": "One or more station IDs could not be validated against GasBuddy -- double check them.",
+      "unsupported_fuel_grade": "These fuel grade(s) are not offered by the station(s): {grades}.",
       "unknown_provider": "Selected provider is unknown."
     },
     "abort": {
