@@ -45,7 +45,7 @@ _CITY_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # 1 week -- these lists barely chang
 _CITY_CACHE_RETRY_SECONDS = 60 * 60  # 1 hour -- retry soon after a failed refresh
 
 
-def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
+async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
     """Return cities for a provider, cached in HA's Store.
 
     The list refreshes when the cache version changes (integration
