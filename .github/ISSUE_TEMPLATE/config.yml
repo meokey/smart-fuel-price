@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Discussions / Q&A
+    url: https://github.com/meokey/smart-fuel-price/discussions
+    about: Questions that aren't bugs or feature requests.

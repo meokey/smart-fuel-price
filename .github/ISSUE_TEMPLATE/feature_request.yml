@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an idea for the integration
+title: "[Feature request]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! A clear problem statement helps more than a prescribed solution.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Who benefits and in what situation?
+      placeholder: "As an EV owner, I'd like to see charging prices next to gas prices..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Your idea of how it could work. Screenshots or sketches welcome.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Other ways to get the same outcome, and why they're worse.
+  - type: dropdown
+    id: intent
+    attributes:
+      label: Do you plan to implement this yourself?
+      description: Pick honestly so work doesn't collide -- suggesting without implementing is perfectly fine.
+      options:
+        - "No -- just suggesting"
+        - "Yes -- I'll submit a PR"
+        - "I can help test / collaborate"
+    validations:
+      required: true
