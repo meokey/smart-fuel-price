@@ -177,6 +177,9 @@ def parse_gasbuddy_report(page_html: str, page_url: str, get) -> dict[str, Any] 
         )
         trend_match = _GASBUDDY_FEED_TREND_RE.search(feed_js)
         trend_src = trend_match.group(2).lower() if trend_match else ""
+        # NOTE: the "down" mapping is confirmed live (served while falling);
+        # the "up" mapping is inferred from GasBuddy's naming convention
+        # (sm_trend_up.gif exists but hasn't been observed during a rise).
         is_dropping = "down" in trend_src
         is_rising = "up" in trend_src and not is_dropping
         trend = "rising" if is_rising else "falling" if is_dropping else "unknown"
