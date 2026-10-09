@@ -26,6 +26,7 @@ from .const import (
     OPTIONAL_ATTRIBUTES,
 )
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
+from .providers.base import filter_cities_with_prices
 from .providers.citynews_ca import CityNewsCaProvider
 from .providers.gasbuddy_ca import GasBuddyStationProvider
 
@@ -38,13 +39,21 @@ _PROVIDER_CLASSES = {
     # city-based, and has no get_supported_cities()/discover_cities().
 }
 
-_CITY_CACHE_VERSION = 1
+_CITY_CACHE_VERSION = 2
 _CITY_CACHE_KEY = f"{DOMAIN}_city_cache"
 _CITY_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # 1 week -- these lists barely change
+_CITY_CACHE_RETRY_SECONDS = 60 * 60  # 1 hour -- retry soon after a failed refresh
 
 
-async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
-    """Return cities for a provider, refreshed at most weekly."""
+def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
+    """Return cities for a provider, cached in HA's Store.
+
+    The list refreshes when the cache version changes (integration
+    upgrade) or the TTL expires -- there is no background timer; refresh
+    happens when the config flow runs (install time). If a refresh fails,
+    we keep the curated static list but retry after a short delay instead
+    of waiting out the full TTL.
+    """
     provider_key = provider_key.lower()
     provider_cls = _PROVIDER_CLASSES.get(provider_key, AffordableEnergyCaProvider)
 
@@ -53,14 +62,26 @@ async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
     entry = cache.get(provider_key)
 
     now = time.time()
-    if entry and (now - entry["fetched_at"]) < _CITY_CACHE_TTL_SECONDS:
+    ttl = entry.get("ttl", _CITY_CACHE_TTL_SECONDS) if entry else 0
+    if entry and (now - entry["fetched_at"]) < ttl:
         return entry["cities"]
 
     discovered = await hass.async_add_executor_job(provider_cls.discover_cities)
-    cities = sorted(discovered.keys()) if discovered else provider_cls.get_supported_cities()
+    if discovered:
+        cities = sorted(discovered.keys())
+        cities = await hass.async_add_executor_job(
+            filter_cities_with_prices, provider_cls, cities
+        )
+        cities = cities or provider_cls.get_supported_cities()
+        ttl = _CITY_CACHE_TTL_SECONDS
+    else:
+        # Refresh failed (network error or empty discovery): keep the
+        # curated static list, but come back soon for another try.
+        cities = provider_cls.get_supported_cities()
+        ttl = _CITY_CACHE_RETRY_SECONDS
 
     if cities:
-        cache[provider_key] = {"cities": cities, "fetched_at": now}
+        cache[provider_key] = {"cities": cities, "fetched_at": now, "ttl": ttl}
         await store.async_save(cache)
 
     return cities or provider_cls.get_supported_cities()

@@ -85,6 +85,31 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         return list(CITY_MAP.keys())
 
     @classmethod
+    def city_has_prices(cls, city: str) -> bool:
+        """Whether the city has a parseable gas-prices page.
+
+        Cheap marker check (one plain GET per URL candidate): accepts the
+        En-Pro forecast sentence or a GasBuddy widget embed. Used to filter
+        live-discovered cities -- markets like Edmonton have a citynews.ca
+        site but no gas prices section at all (Oct 2026 probe).
+        """
+        session = cls._build_session()
+        for path_template in GAS_PRICES_PATH_CANDIDATES:
+            path = path_template.format(subdomain=city)
+            url = f"https://{city}.{cls.BASE_DOMAIN}/{path}"
+            try:
+                response = session.get(url, timeout=10)
+                response.raise_for_status()
+                page_html = response.text
+            except requests.exceptions.RequestException:
+                continue
+            if vendor_widgets.parse_en_pro_forecast(page_html):
+                return True
+            if vendor_widgets.has_gasbuddy_widget(page_html):
+                return True
+        return False
+
+    @classmethod
     def discover_cities(cls) -> dict[str, str] | None:
         """Best-effort live discovery via citynews.ca's city switcher.
 

@@ -226,3 +226,11 @@ class TestBaseHelpers:
             "is_rising": rising,
             "is_dropping": dropping,
         }
+
+
+def test_has_gasbuddy_widget():
+    from sfp_providers import vendor_widgets
+
+    page = '<script src="https://df.gasbuddy.com/feed.gdf?k=abc&i=12661"></script>'
+    assert vendor_widgets.has_gasbuddy_widget(page) is True
+    assert vendor_widgets.has_gasbuddy_widget("<html>no widget here</html>") is False

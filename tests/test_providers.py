@@ -845,3 +845,63 @@ def test_gaswizard_matches_entries_by_date_not_position():
     assert data["current_price"] == pytest.approx(187.9)
     assert data["tomorrow_price"] == pytest.approx(188.9)
     assert data["state"] == pytest.approx(1.0)
+
+
+# --- city_has_prices / filter_cities_with_prices ---
+
+def _patched_session(monkeypatch, pages):
+    """Patch CityNewsCaProvider._build_session to return a FakeSession."""
+    session = FakeSession(pages)
+    monkeypatch.setattr(
+        CityNewsCaProvider, "_build_session", classmethod(lambda cls: session)
+    )
+    return session
+
+
+def test_city_has_prices_forecast_layout(monkeypatch):
+    _patched_session(
+        monkeypatch, {"https://toronto.citynews.ca/gas-prices/": CITYNEWS_TORONTO_HTML}
+    )
+    assert CityNewsCaProvider.city_has_prices("toronto") is True
+
+
+def test_city_has_prices_gasbuddy_layout(monkeypatch):
+    _patched_session(
+        monkeypatch,
+        {"https://calgary.citynews.ca/calgary-gas-prices/": CALGARY_PAGE_HTML},
+    )
+    assert CityNewsCaProvider.city_has_prices("calgary") is True
+
+
+def test_city_has_prices_soft404_excluded(monkeypatch):
+    # Edmonton: both candidates are soft-404s to old articles, no markers.
+    article = "<html><head><title>Edmonton has some of the lowest gas prices</title></head><body>news</body></html>"
+    _patched_session(
+        monkeypatch,
+        {
+            "https://edmonton.citynews.ca/gas-prices/": article,
+            "https://edmonton.citynews.ca/edmonton-gas-prices/": article,
+        },
+    )
+    assert CityNewsCaProvider.city_has_prices("edmonton") is False
+
+
+def test_city_has_prices_defaults_true():
+    # Providers with curated static lists keep everything.
+    assert AffordableEnergyCaProvider.city_has_prices("toronto") is True
+    assert GasBuddyStationProvider.city_has_prices("whatever") is True
+
+
+def test_filter_cities_with_prices_drops_and_fail_opens(monkeypatch):
+    from sfp_providers.base import filter_cities_with_prices
+
+    def fake_has_prices(city):
+        if city == "boom":
+            raise RuntimeError("probe blew up")
+        return city != "edmonton"
+
+    monkeypatch.setattr(CityNewsCaProvider, "city_has_prices", classmethod(lambda cls, c: fake_has_prices(c)))
+    result = filter_cities_with_prices(
+        CityNewsCaProvider, ["toronto", "edmonton", "boom", "calgary"]
+    )
+    assert result == ["toronto", "boom", "calgary"]

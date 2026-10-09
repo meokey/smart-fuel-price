@@ -229,6 +229,17 @@ class BaseFuelPriceProvider(ABC):
         """
         return None
 
+    @classmethod
+    def city_has_prices(cls, city: str) -> bool:
+        """Whether a discovered city actually has price data to offer.
+
+        Called to filter live-discovered city lists before they reach the
+        config UI, so cities without a parseable price page never become
+        selectable. Default True: providers with a curated static list
+        don't need this check.
+        """
+        return True
+
     def fetch_data(self) -> dict[str, Any]:
         """
         Template method: Fetch and parse fuel price data securely.
@@ -391,4 +402,19 @@ class BaseFuelPriceProvider(ABC):
         response = self._session.get(url, **kwargs)
         response.raise_for_status()
         return response
+def filter_cities_with_prices(provider_cls, cities: list[str]) -> list[str]:
+    """Drop cities that have no parseable price page (via city_has_prices).
 
+    A probe that raises keeps the city (fail-open): one bad probe must
+    not wipe the whole list.
+    """
+    kept = []
+    for city in cities:
+        try:
+            has = provider_cls.city_has_prices(city)
+        except Exception:  # noqa: BLE001 -- fail-open, see above
+            kept.append(city)
+            continue
+        if has:
+            kept.append(city)
+    return kept
