@@ -78,6 +78,22 @@ sys.modules.update(
     }
 )
 
+# ---- stub voluptuous (config_flow imports it; CI's env doesn't have it) ----
+volmod = types.ModuleType("voluptuous")
+
+
+def _vol_dummy(*args, **kwargs):
+    class _D:
+        def __call__(self, *a, **k):
+            return _D()
+
+    return _D()
+
+
+for _n in ("Schema", "Required", "Optional", "In"):
+    setattr(volmod, _n, _vol_dummy)
+sys.modules["voluptuous"] = volmod
+
 # ---- load the real integration modules ----
 COMP = Path(__file__).resolve().parents[1] / "custom_components" / "smart_fuel_price"
 pkg = types.ModuleType("custom_components"); pkg.__path__ = [str(COMP.parent)]
