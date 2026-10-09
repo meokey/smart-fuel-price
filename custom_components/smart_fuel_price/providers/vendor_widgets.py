@@ -131,6 +131,14 @@ def parse_en_pro_forecast(page_html: str) -> dict[str, Any] | None:
     return _forecast_result(current_cents, tomorrow_cents, effective_date_str)
 
 
+def has_gasbuddy_widget(page_html: str) -> bool:
+    """Whether the page embeds a GasBuddy price widget (feed.gdf script tag).
+
+    Cheap marker check only -- does not replay the feed request.
+    """
+    return bool(_GASBUDDY_FEED_SRC_RE.search(page_html))
+
+
 def parse_gasbuddy_report(page_html: str, page_url: str, get) -> dict[str, Any] | None:
     """Fetch + parse GasBuddy's average-price widget.
 
