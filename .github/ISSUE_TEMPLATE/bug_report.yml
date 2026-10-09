@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a problem with the integration
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill in the fields below so the problem can be reproduced.
+  - type: input
+    id: version
+    attributes:
+      label: Integration version
+      description: Find it under Settings → Devices & Services → Smart Fuel Price (e.g. 2.3.30).
+      placeholder: "2.3.30"
+    validations:
+      required: true
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      description: e.g. 2026.10.0
+      placeholder: "2026.10.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Affected provider
+      options:
+        - Gas Wizard (Affordable Energy)
+        - CityNews
+        - GasBuddy
+        - Not sure / multiple
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What you saw vs. what you expected.
+      placeholder: "The GasBuddy price sensor shows Unknown even though..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: How to trigger it again, if you know.
+      placeholder: "1. Restart Home Assistant\n2. Open the device page..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log excerpts
+      description: Settings → System → Logs, filter for "smart_fuel_price". Paste any warnings/errors.
+      render: text
+  - type: dropdown
+    id: intent
+    attributes:
+      label: Do you plan to work on a fix yourself?
+      description: Pick honestly so work doesn't collide -- a "no" is perfectly fine.
+      options:
+        - "No -- just reporting"
+        - "Yes -- I'll submit a PR"
+        - "I can help test a fix"
+    validations:
+      required: true

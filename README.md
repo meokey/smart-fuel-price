@@ -5,9 +5,20 @@
 ![Release](https://img.shields.io/github/v/release/meokey/smart-fuel-price)
 ![HACS Validation](https://github.com/meokey/smart-fuel-price/actions/workflows/release.yml/badge.svg)
 ![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)
+![Issues](https://img.shields.io/github/issues/meokey/smart-fuel-price)
 ![License](https://img.shields.io/github/license/meokey/smart-fuel-price)
 
-A Home Assistant custom integration that provides real-time and next-day fuel price predictions for Canadian and global cities across multiple providers.
+A Home Assistant custom integration that tracks fuel prices for Canadian cities — daily price forecasts (Gas Wizard, CityNews) and live per-station prices (GasBuddy, anywhere it has data).
+
+---
+
+## Screenshots
+
+![Device cards: CityNews, Gas Wizard and GasBuddy devices](images/devices-overview.png)
+
+| Integration page | Options flow |
+|---|---|
+| ![Integration page with hubs and devices](images/integration-page.png) | ![Attributes & Caching options](images/options-flow.png) |
 
 ---
 
@@ -142,7 +153,7 @@ cards:
 | Provider Identifier | Target Region | Dynamic Cities Supported |
 | :--- | :--- | :--- |
 | `affordableenergy_ca` | Canada (Nationwide) | `toronto`, `mississauga`, `vancouver`, `calgary`, `ottawa`, `montreal` -- all confirmed live |
-| `citynews_ca` | Canada Major Cities | `toronto`, `ottawa`, `kitchener` (`calgary` currently unsupported -- see below) |
+| `citynews_ca` | Canada Major Cities | `toronto`, `ottawa`, `kitchener` (`calgary` currently unsupported -- tracked in [#30](https://github.com/meokey/smart-fuel-price/issues/30)) |
 | `gasbuddy_ca` | Any station, anywhere GasBuddy has data (GTA included) | N/A -- configured by station ID, not a fixed city list; see [GasBuddy section](#gasbuddy-per-station) below |
 
 > **Note:** Gas Wizard publishes tomorrow's forecast on its own schedule (usually by the evening).
@@ -155,6 +166,25 @@ cards:
 Devices and entities are named **"Smart Fuel Price - `<City>` - `<Provider>`"** (or, for GasBuddy, **"Smart Fuel Price - `<City>` - GasBuddy (`<Station Name>`)"**), so everything this integration creates sorts and groups together in the Home Assistant UI.
 
 Each device is also created with a **suggested Area** matching its city -- Home Assistant will automatically create that Area (if it doesn't already exist) and assign the device to it the first time it's set up. You're free to change this afterward; it's a one-time suggestion, not an enforced setting.
+
+---
+
+## Sensors & Attributes
+
+Every device carries three housekeeping entities plus its price sensors:
+
+| Entity | What it tells you |
+|---|---|
+| **Last updated** | Timestamp of the last *successful* data fetch (automatic or manual). This is the true data-freshness signal. |
+| **Update status** | `OK` / `Rate limited` / `Failed` for the last fetch attempt. When automatic polls are rate-limited it also carries a `suggestion` attribute advising a higher cache threshold. |
+| **Manual refresh** (button) | Cache-bypassing fetch on demand. |
+
+Key attributes on the price sensors (all toggleable via the Options flow):
+
+| Sensor | Notable attributes |
+|---|---|
+| Gas Wizard / CityNews price sensors | `current_price`, `tomorrow_price`, `effective_date_str` (the exact forecast date, e.g. "Wednesday Oct 7, 2026"), `city` |
+| GasBuddy price sensor (per grade) | `station_name`, `station_id`, `fuel_grade`, `phone`, `address`, `city`, `province_or_state`, `latitude`, `longitude`, `last_reported_str`, `stale` (true while serving cached data during an outage) |
 
 ---
 
@@ -182,7 +212,7 @@ updates once a day, so these sensors refresh every 30 minutes rather
 than the 4-hour default used by the forecast providers.
 
 Note: GasBuddy reports Canadian prices in cents per litre (e.g. `168.9`
-\u00a2/L). The value is shown as-is with the `\u00a2/L` unit, consistent
+¢/L). The value is shown as-is with the `¢/L` unit, consistent
 with the other sensors and with how prices are quoted on Canadian pumps.
 
 *Station price data is retrieved via GasBuddy's official GraphQL API.
@@ -193,14 +223,55 @@ earlier versions used an endpoint documented by the
 [Red5d/ha-gasbuddy](https://github.com/Red5d/ha-gasbuddy) project, thanks
 to Red5d and contributors for that groundwork.*
 
-## Upgrading to v2.3.6+
+---
 
-`state` changed meaning: for the forecast providers (Gas Wizard,
-CityNews) it's now the **signed price change** in ¢/L (e.g. `-7.0`,
-`0.0`, `+4.0`) rather than the current price in $/L. GasBuddy sensors
-were unaffected -- their `state` has always been the current price in $.
-Check any automations that read a forecast-provider sensor's state
-directly.
+## Troubleshooting
+
+**A sensor shows "Unknown".**
+Check the device's **Last updated** and **Update status** sensors first.
+Right after a restart, the first fetch can take one poll cycle; the
+persisted cache (`.storage`) normally covers the gap. Forecast providers
+show `unknown` (never stale data) until the source publishes fresh
+numbers — for Gas Wizard's tomorrow forecast that is usually by the
+evening.
+
+**Update status says "Rate limited".**
+The source is throttling requests. The sensor keeps working from cache
+(GasBuddy marks it `stale: True`). Follow the `suggestion` attribute:
+raise the **cache threshold** for that entry under Configure (gear icon).
+
+**The entity list says "updated X minutes ago" but the data looks old.**
+That text comes from Home Assistant's `last_changed`, which resets
+whenever the entity is re-created (HA restart, options change) — it is
+not a data-freshness signal. Trust the **Last updated** sensor instead.
+
+**GasBuddy flips between OK and "Rate limited".**
+GasBuddy occasionally challenges automated requests (Cloudflare). The
+integration retries with a fresh session token; brief flapping during
+such episodes is expected and resolves on its own.
+
+Still stuck? File a bug report — see [Contributing](#contributing).
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome!
+
+- **Bug reports / feature requests:** use the [issue templates](https://github.com/meokey/smart-fuel-price/issues/new/choose) — they ask for the integration version, provider, and logs up front. One honest question in each template: *do you plan to work on it yourself?* Answering "just suggesting" is perfectly fine; it just keeps two people from building the same thing.
+- **Questions that aren't bugs:** open a [Discussion](https://github.com/meokey/smart-fuel-price/discussions).
+- **Pull requests:** small, focused PRs with a green test run (`pytest`) are the fastest to review.
+
+Please note the data sources are read-only — the integration only ever
+*fetches* prices; it never submits anything back to a source.
+
+---
+
+## Changelog
+
+See the [Releases page](https://github.com/meokey/smart-fuel-price/releases) for the changelog.
+
+---
 
 ## Development
 
