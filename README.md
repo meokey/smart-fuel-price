@@ -161,7 +161,7 @@ cards:
 | Provider Identifier | Target Region | Dynamic Cities Supported |
 | :--- | :--- | :--- |
 | `affordableenergy_ca` | Canada (Nationwide) | `toronto`, `mississauga`, `vancouver`, `calgary`, `ottawa`, `montreal` -- all confirmed live |
-| `citynews_ca` | Canada Major Cities | `toronto`, `ottawa`, `kitchener` (`calgary` currently unsupported -- tracked in [#30](https://github.com/meokey/smart-fuel-price/issues/30)) |
+| `citynews_ca` | Canada Major Cities | `toronto`, `ottawa`, `kitchener` (next-day forecast) + `calgary` (current average via the GasBuddy widget -- no forecast) |
 | `gasbuddy_ca` | Any station, anywhere GasBuddy has data (GTA included) | N/A -- configured by station ID, not a fixed city list; see [GasBuddy section](#gasbuddy-per-station) below |
 
 > **Note:** Gas Wizard publishes tomorrow's forecast on its own schedule (usually by the evening).
