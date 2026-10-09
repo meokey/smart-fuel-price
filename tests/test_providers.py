@@ -155,9 +155,56 @@ def test_citynews_falls_back_to_second_url_slug():
     ]
 
 
-def test_citynews_calgary_parked_fails_soft():
-    # Calgary's GasBuddy widget isn't resolved yet; it must not crash.
-    session = FakeSession({"https://calgary.citynews.ca/gas-prices/": "<html>no price here</html>"})
+CALGARY_PAGE_HTML = """
+<html><body>
+<td align="center" id="gasbuddy_12661"></td>
+<script src="https://df.gasbuddy.com/feed.gdf?k=KEY123&amp;ia=1&amp;i=12661"></script>
+</body></html>
+"""
+
+CALGARY_FEED_JS = (
+    "document.getElementById('city126610').innerHTML='Calgary';"
+    "document.getElementById('price126610').innerHTML='169.1';"
+    "document.getElementById('trend_img126610').src="
+    "'https://df.gasbuddy.com/images/sm_trend_down.gif';"
+)
+
+CALGARY_FEED_URL = (
+    "https://df.gasbuddy.com/feed.gdf?k=KEY123&ia=1&i=12661"
+    "&url=calgary.citynews.ca%2Fcalgary-gas-prices%2F"
+)
+
+
+def test_citynews_calgary_gasbuddy_widget_end_to_end():
+    session = FakeSession(
+        {
+            "https://calgary.citynews.ca/calgary-gas-prices/": CALGARY_PAGE_HTML,
+            CALGARY_FEED_URL: CALGARY_FEED_JS,
+        }
+    )
+    provider = CityNewsCaProvider("calgary", session=session)
+    data = provider.fetch_data()
+
+    assert data["is_valid"] is True
+    assert data["state"] == pytest.approx(169.1)
+    assert data["current_price"] == pytest.approx(169.1)
+    assert data["trend"] == "falling"
+    assert data["city"] == "calgary"
+    # the gasbuddy layout reports a current average, not a forecast change
+    assert provider.sensor_name == "Current Average Price"
+    assert provider.allow_stale_on_failure is True
+    # widget page slug wins over the soft-404 "gas-prices/" article
+    assert session.requested[0] == "https://calgary.citynews.ca/calgary-gas-prices/"
+
+
+def test_citynews_calgary_without_widget_fails_soft():
+    # A Calgary page with no GasBuddy widget must not crash.
+    session = FakeSession(
+        {
+            "https://calgary.citynews.ca/calgary-gas-prices/": "<html>no price here</html>",
+            "https://calgary.citynews.ca/gas-prices/": "<html>no price here</html>",
+        }
+    )
     data = CityNewsCaProvider("calgary", session=session).fetch_data()
 
     assert data["is_valid"] is False

@@ -46,20 +46,51 @@ average of 181.9 cent(s)/litre at local stations.
 
 FORECAST_NO_MATCH_HTML = "<html><body>Nothing relevant here.</body></html>"
 
-# Modelled on the State/Price/Trend widget from calgary.citynews.ca's
-# GasBuddy embed (original screenshot, project history).
-GASBUDDY_FALLING_HTML = """
-<table id="APF_tbl">
-  <tr>
-    <td><span id="price126610">167.7</span></td>
-    <td><img id="trend_img126610" src="https://df.gasbuddy.com/images/sm_trend_down.gif"></td>
-  </tr>
-</table>
+# Modelled on calgary.citynews.ca/calgary-gas-prices/ (confirmed live
+# 2026-10-09): the plain-GET page only carries the widget placeholder +
+# script tag; the price arrives via a second GET to feed.gdf whose
+# response is JavaScript writing the numbers into the DOM.
+GASBUDDY_PAGE_HTML = """
+<html><body>
+<table><tr><td align="center" id="gasbuddy_12661"></td></tr></table>
+<script src="https://df.gasbuddy.com/feed.gdf?k=KEY123&amp;ia=1&amp;i=12661"></script>
+</body></html>
 """
 
-GASBUDDY_RISING_HTML = GASBUDDY_FALLING_HTML.replace(
+GASBUDDY_FEED_JS_FALLING = (
+    "document.getElementById('city126610').innerHTML='Calgary';"
+    "document.getElementById('price126610').innerHTML='169.1';"
+    "document.getElementById('trend_img126610').src="
+    "'https://df.gasbuddy.com/images/sm_trend_down.gif';"
+)
+
+GASBUDDY_FEED_JS_RISING = GASBUDDY_FEED_JS_FALLING.replace(
     "sm_trend_down.gif", "sm_trend_up.gif"
 )
+
+GASBUDDY_PAGE_URL = "https://calgary.citynews.ca/calgary-gas-prices/"
+
+
+class _FakeFeedResponse:
+    def __init__(self, text):
+        self.text = text
+
+
+def _feed_get(mapping):
+    """Fake provider._get: mapping of URL substring -> text or Exception."""
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(url)
+        for key, value in mapping.items():
+            if key in url:
+                if isinstance(value, Exception):
+                    raise value
+                return _FakeFeedResponse(value)
+        raise AssertionError(f"unexpected feed URL: {url}")
+
+    get.calls = calls
+    return get
 
 
 class TestParseEnProForecast:
@@ -105,25 +136,68 @@ class TestParseEnProForecast:
 
 class TestParseGasbuddyReport:
     def test_falling_trend(self):
-        result = vendor_widgets.parse_gasbuddy_report(GASBUDDY_FALLING_HTML)
+        get = _feed_get({"feed.gdf": GASBUDDY_FEED_JS_FALLING})
+        result = vendor_widgets.parse_gasbuddy_report(
+            GASBUDDY_PAGE_HTML, GASBUDDY_PAGE_URL, get
+        )
 
         assert result is not None
         assert result["is_valid"] is True
+        assert result["state"] == pytest.approx(169.1)
+        assert result["current_price"] == pytest.approx(169.1)
+        assert result["tomorrow_price"] is None  # average, not a forecast
         assert result["trend"] == "falling"
         assert result["is_dropping"] is True
-        assert result["current_price"] == pytest.approx(167.7)
-        assert result["state"] is None  # change size not in the summary widget
-        assert result["tomorrow_price"] is None  # GasBuddy has no forecast
+        assert result["is_rising"] is False
+        assert result["feed_city"] == "Calgary"
+        # the browser-style second request carries the page as url=
+        assert (
+            "url=calgary.citynews.ca%2Fcalgary-gas-prices%2F" in get.calls[0]
+        )
 
     def test_rising_trend(self):
-        result = vendor_widgets.parse_gasbuddy_report(GASBUDDY_RISING_HTML)
+        get = _feed_get({"feed.gdf": GASBUDDY_FEED_JS_RISING})
+        result = vendor_widgets.parse_gasbuddy_report(
+            GASBUDDY_PAGE_HTML, GASBUDDY_PAGE_URL, get
+        )
 
         assert result is not None
         assert result["trend"] == "rising"
         assert result["is_rising"] is True
 
-    def test_no_match_returns_none(self):
-        assert vendor_widgets.parse_gasbuddy_report("<html></html>") is None
+    def test_no_feed_tag_returns_none_without_network(self):
+        get = _feed_get({})
+        assert (
+            vendor_widgets.parse_gasbuddy_report("<html></html>", GASBUDDY_PAGE_URL, get)
+            is None
+        )
+        assert get.calls == []
+
+    def test_feed_fetch_error_returns_none(self):
+        get = _feed_get({"feed.gdf": RuntimeError("boom")})
+        assert (
+            vendor_widgets.parse_gasbuddy_report(
+                GASBUDDY_PAGE_HTML, GASBUDDY_PAGE_URL, get
+            )
+            is None
+        )
+
+    def test_skips_feed_without_price(self):
+        get = _feed_get(
+            {
+                "i=11111": "document.write('nothing here');",
+                "i=12661": GASBUDDY_FEED_JS_FALLING,
+            }
+        )
+        page = GASBUDDY_PAGE_HTML.replace("i=12661", "i=11111") + (
+            '<script src="https://df.gasbuddy.com/feed.gdf?k=KEY123&ia=1&i=12661">'
+            "</script>"
+        )
+        result = vendor_widgets.parse_gasbuddy_report(page, GASBUDDY_PAGE_URL, get)
+
+        assert result is not None
+        assert result["state"] == pytest.approx(169.1)
+        assert len(get.calls) == 2
 
 
 class TestBaseHelpers:

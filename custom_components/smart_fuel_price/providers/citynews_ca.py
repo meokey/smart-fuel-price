@@ -7,12 +7,15 @@ citynews.ca runs a network of city-specific sites, each with its own
     all at /gas-prices/. Parsed by vendor_widgets.parse_en_pro_forecast().
     Gives a genuine next-day price forecast.
 
-  * "gasbuddy" layout -- Calgary. PARKED/unresolved: the page embeds the
-    widget via a chain of df.gasbuddy.com script redirects, and the
-    specific instance id from the original screenshot (gasbuddy_12661 /
-    APF_tbl) hasn't been reproduced via a plain GET on /gas-prices/ or
-    /calgary-gas-prices/ yet. Revisit once a confirmed HTML sample is in
-    hand; vendor_widgets.parse_gasbuddy_report() is ready for it.
+  * "gasbuddy" layout -- Calgary, at /calgary-gas-prices/. The page embeds
+    GasBuddy's average-price widget: the plain-GET HTML only carries a
+    placeholder plus <script src="https://df.gasbuddy.com/feed.gdf?...">
+    tags; the browser then GETs each feed URL and the response JavaScript
+    writes the price into the DOM
+    (document.getElementById('price126610').innerHTML='169.1'). No JS
+    execution is needed -- vendor_widgets.parse_gasbuddy_report() replays
+    the second GET and regexes the price out. Gives the *current average*,
+    not a forecast.
 
 Other citynews.ca markets (Vancouver, Edmonton, Winnipeg, Montreal,
 Halifax) exist but haven't been checked -- see CITY_MAP below.
@@ -59,6 +62,24 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
     def name(self) -> str:
         return "CityNews Canada"
 
+    def _parser_hint(self) -> str:
+        """Which widget layout this instance's city uses."""
+        return CITY_MAP.get(self.city, {}).get("parser", "auto")
+
+    @property
+    def sensor_name(self) -> str:
+        # The gasbuddy layout reports a current average, not a forecast
+        # change -- name the entity accordingly.
+        if self._parser_hint() == "gasbuddy":
+            return "Current Average Price"
+        return super().sensor_name
+
+    @property
+    def allow_stale_on_failure(self) -> bool:
+        # A slightly old average beats no average during outages (same
+        # reasoning as the GasBuddy station provider).
+        return self._parser_hint() == "gasbuddy"
+
     @classmethod
     def get_supported_cities(cls) -> list[str]:
         return list(CITY_MAP.keys())
@@ -103,7 +124,7 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         subdomain = city_info["subdomain"]
         parser_hint = city_info.get("parser", "auto")
 
-        fetched = self._fetch_gas_prices_page(subdomain)
+        fetched = self._fetch_gas_prices_page(subdomain, parser_hint)
         if fetched is None:
             _LOGGER.error(
                 "[%s] Could not fetch a Gas Prices page for '%s' at any known URL.",
@@ -124,7 +145,9 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
                 return parsed
 
         if parser_hint in ("gasbuddy", "auto"):
-            parsed = vendor_widgets.parse_gasbuddy_report(page_html)
+            parsed = vendor_widgets.parse_gasbuddy_report(
+                page_html, _page_url, self._get
+            )
             if parsed:
                 parsed["city"] = subdomain
                 return parsed
@@ -143,9 +166,21 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         """Last successfully parsed article URL (None before first success)."""
         return getattr(self, "_last_source_url", None)
 
-    def _fetch_gas_prices_page(self, subdomain: str) -> tuple[str, str] | None:
-        """Try each known URL slug in turn; return (url, html) for the first hit."""
-        for path_template in GAS_PRICES_PATH_CANDIDATES:
+    def _fetch_gas_prices_page(
+        self, subdomain: str, parser_hint: str = "auto"
+    ) -> tuple[str, str] | None:
+        """Try each known URL slug in turn; return (url, html) for the first hit.
+
+        Candidate order is parser-aware: the "{subdomain}-gas-prices/" slug
+        is the widget page for gasbuddy-layout cities (Calgary), while
+        plain "gas-prices/" soft-404s there (redirects to an old article
+        with HTTP 200, so it can't be skipped on status alone).
+        """
+        if parser_hint == "gasbuddy":
+            candidates = ("{subdomain}-gas-prices/", "gas-prices/")
+        else:
+            candidates = GAS_PRICES_PATH_CANDIDATES
+        for path_template in candidates:
             path = path_template.format(subdomain=subdomain)
             url = f"https://{subdomain}.{self.BASE_DOMAIN}/{path}"
             try:
