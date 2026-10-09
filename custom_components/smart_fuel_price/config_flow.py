@@ -53,10 +53,26 @@ async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
     happens when the config flow runs (install time). If a refresh fails,
     we keep the curated static list but retry after a short delay instead
     of waiting out the full TTL.
+
+    This function never raises: the city list is a UX convenience and a
+    failed refresh must never break the config flow. Failures are logged
+    with a full traceback so the root cause is diagnosable from the log.
     """
     provider_key = provider_key.lower()
     provider_cls = _PROVIDER_CLASSES.get(provider_key, AffordableEnergyCaProvider)
+    try:
+        return await _get_cities_for_provider_unsafe(hass, provider_key, provider_cls)
+    except Exception:
+        _LOGGER.exception(
+            "City list refresh failed for provider '%s'; falling back to "
+            "the static curated list",
+            provider_key,
+        )
+        return provider_cls.get_supported_cities()
 
+
+async def _get_cities_for_provider_unsafe(hass, provider_key: str, provider_cls) -> list[str]:
+    """Inner city-list refresh; may raise (callers must handle)."""
     store = Store(hass, _CITY_CACHE_VERSION, _CITY_CACHE_KEY)
     cache = await store.async_load() or {}
     entry = cache.get(provider_key)
