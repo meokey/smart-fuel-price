@@ -3,11 +3,11 @@
 Unlike test_all_provider_modules_import_cleanly (which needs modules to
 actually import successfully, and therefore can't cover config_flow.py,
 sensor.py or __init__.py -- they import `homeassistant`, which isn't
-installed here), this only parses each file's grammar via ast.parse().
-That's enough to catch a SyntaxError/IndentationError without needing
-any of the file's imports to resolve -- exactly the class of bug that
-slipped past every other check (this repo's config_flow.py had exactly
-this kind of bug ship silently).
+installed here), this compiles each file's grammar via compile().
+compile() is used rather than ast.parse() deliberately: some errors --
+e.g. 'await' outside an async function -- parse into a valid AST and only
+fail at bytecode-compile time. v2.3.32 shipped exactly that bug in
+config_flow.py and ast.parse() let it through.
 """
 
 import ast
@@ -28,7 +28,9 @@ def _all_python_files():
 )
 def test_python_file_has_valid_syntax(path):
     source = path.read_text(encoding="utf-8")
-    ast.parse(source, filename=str(path))  # raises SyntaxError if malformed
+    # compile(), not ast.parse(): the latter accepts e.g. 'await' outside an
+    # async function and only the former raises (v2.3.32 regression).
+    compile(source, str(path), "exec")  # raises SyntaxError if malformed
 
 
 # HA APIs that were removed in recent versions. A syntax check cannot catch
