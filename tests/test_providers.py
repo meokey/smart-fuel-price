@@ -905,3 +905,30 @@ def test_filter_cities_with_prices_drops_and_fail_opens(monkeypatch):
         CityNewsCaProvider, ["toronto", "edmonton", "boom", "calgary"]
     )
     assert result == ["toronto", "boom", "calgary"]
+
+
+def test_gaswizard_gta_end_to_end():
+    # GTA is a first-class city on gaswizard.ca (its own /gta page with
+    # the same single-city-prices markup); live-verified Oct 9 2026.
+    html = _gaswizard_html(
+        (_TODAY + timedelta(days=1), "182.9",
+         '<div class="price-direction pd-down"><span class="price-text">-3&#162;</span></div>'),
+        (_TODAY, "185.9",
+         '<div class="price-direction pd-down"><span class="price-text">-2&#162;</span></div>'),
+    )
+    session = FakeSession({"https://www.gaswizard.ca/gta": html})
+    provider = AffordableEnergyCaProvider("gta", session=session)
+    assert provider.source_url == "https://www.gaswizard.ca/gta"
+
+    data = provider.fetch_data()
+    assert data["is_valid"] is True
+    assert data["state"] == pytest.approx(-3.0)  # 182.9 - 185.9
+    assert data["tomorrow_price"] == pytest.approx(182.9)
+    assert data["current_price"] == pytest.approx(185.9)
+    assert data["trend"] == "falling"
+
+
+def test_gaswizard_supported_cities_includes_gta():
+    cities = AffordableEnergyCaProvider.get_supported_cities()
+    assert "gta" in cities
+    assert {"toronto", "mississauga", "vancouver", "calgary", "ottawa", "montreal"} <= set(cities)

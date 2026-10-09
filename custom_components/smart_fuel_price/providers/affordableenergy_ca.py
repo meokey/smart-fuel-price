@@ -49,8 +49,8 @@ from .base import BaseFuelPriceProvider, trend_fields
 
 _LOGGER = logging.getLogger(__name__)
 
-# Only "toronto" has been live-verified; the rest follow the same URL
-# pattern by inference (all six appear in the site's own city list).
+# Only "toronto" and "gta" have been live-verified; the rest follow the
+# same URL pattern by inference (all appear in the site's own city list).
 CITY_MAP: dict[str, str] = {
     "toronto": "toronto",
     "mississauga": "mississauga",
@@ -58,6 +58,7 @@ CITY_MAP: dict[str, str] = {
     "calgary": "calgary",
     "ottawa": "ottawa",
     "montreal": "montreal",
+    "gta": "gta",
 }
 
 _PRICE_LIST_RE = re.compile(
