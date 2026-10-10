@@ -37,14 +37,26 @@ CITY_MAP: dict[str, dict[str, str]] = {
     "ottawa": {"subdomain": "ottawa", "parser": "forecast"},
     "kitchener": {"subdomain": "kitchener", "parser": "forecast"},
     "calgary": {"subdomain": "calgary", "parser": "gasbuddy"},
-    # Confirmed to exist on citynews.ca's city switcher, but layout not
-    # yet visually verified -- add once confirmed:
+    # Halifax's page uses a non-standard slug (not "{subdomain}-gas-prices/"),
+    # hence the explicit "path" -- plain GET of static Date/Change/Price
+    # tables (regular + diesel), confirmed live 2026-10-09.
+    "halifax": {
+        "subdomain": "halifax",
+        "parser": "halifax_table",
+        "path": "halifax-nova-scotia-gas-diesel-prices/",
+    },
+    # The rest have citynews.ca sites but no Gas Prices section at all:
+    # no nav tab and both standard URL candidates soft-404 (nav-tab probe
+    # 2026-10-09; Halifax was the exception, now covered above).
     # "vancouver": {"subdomain": "vancouver", "parser": "auto"},
     # "edmonton": {"subdomain": "edmonton", "parser": "auto"},
     # "winnipeg": {"subdomain": "winnipeg", "parser": "auto"},
     # "montreal": {"subdomain": "montreal", "parser": "auto"},
-    # "halifax": {"subdomain": "halifax", "parser": "auto"},
 }
+
+# Parser layouts that report a CURRENT price (not a forecast): the sensor
+# shows the price itself and tolerates stale reads during outages.
+_CURRENT_PRICE_PARSERS = ("gasbuddy", "halifax_table")
 
 GAS_PRICES_PATH_CANDIDATES = ("gas-prices/", "{subdomain}-gas-prices/")
 
@@ -68,17 +80,17 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
 
     @property
     def sensor_name(self) -> str:
-        # The gasbuddy layout reports a current average, not a forecast
-        # change -- name the entity accordingly.
-        if self._parser_hint() == "gasbuddy":
+        # Current-price layouts report a price, not a forecast change --
+        # name the entity accordingly.
+        if self._parser_hint() in _CURRENT_PRICE_PARSERS:
             return "Current Average Price"
         return super().sensor_name
 
     @property
     def allow_stale_on_failure(self) -> bool:
-        # A slightly old average beats no average during outages (same
+        # A slightly old price beats no price during outages (same
         # reasoning as the GasBuddy station provider).
-        return self._parser_hint() == "gasbuddy"
+        return self._parser_hint() in _CURRENT_PRICE_PARSERS
 
     @classmethod
     def get_supported_cities(cls) -> list[str]:
@@ -89,12 +101,17 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         """Whether the city has a parseable gas-prices page.
 
         Cheap marker check (one plain GET per URL candidate): accepts the
-        En-Pro forecast sentence or a GasBuddy widget embed. Used to filter
-        live-discovered cities -- markets like Edmonton have a citynews.ca
-        site but no gas prices section at all (Oct 2026 probe).
+        En-Pro forecast sentence, a GasBuddy widget embed, or Halifax's
+        static Date/Change/Price tables. Used to filter live-discovered
+        cities -- markets like Edmonton have a citynews.ca site but no gas
+        prices section at all (Oct 2026 probe). Cities with a non-standard
+        page slug (Halifax) are probed at their explicit path.
         """
         session = cls._build_session()
-        for path_template in GAS_PRICES_PATH_CANDIDATES:
+        city_info = CITY_MAP.get(city, {})
+        custom_path = city_info.get("path")
+        templates = (custom_path,) if custom_path else GAS_PRICES_PATH_CANDIDATES
+        for path_template in templates:
             path = path_template.format(subdomain=city)
             url = f"https://{city}.{cls.BASE_DOMAIN}/{path}"
             try:
@@ -106,6 +123,8 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
             if vendor_widgets.parse_en_pro_forecast(page_html):
                 return True
             if vendor_widgets.has_gasbuddy_widget(page_html):
+                return True
+            if vendor_widgets.parse_halifax_tables(page_html):
                 return True
         return False
 
@@ -177,6 +196,12 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
                 parsed["city"] = subdomain
                 return parsed
 
+        if parser_hint in ("halifax_table", "auto"):
+            parsed = vendor_widgets.parse_halifax_tables(page_html)
+            if parsed:
+                parsed["city"] = subdomain
+                return parsed
+
         _LOGGER.warning(
             "[%s] Could not match a known layout for '%s'. Compare "
             "'view-source:' to the browser-rendered DOM to confirm the "
@@ -201,7 +226,12 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         plain "gas-prices/" soft-404s there (redirects to an old article
         with HTTP 200, so it can't be skipped on status alone).
         """
-        if parser_hint == "gasbuddy":
+        city_info = next(
+            (v for v in CITY_MAP.values() if v["subdomain"] == subdomain), {}
+        )
+        if city_info.get("path"):
+            candidates = (city_info["path"],)
+        elif parser_hint == "gasbuddy":
             candidates = ("{subdomain}-gas-prices/", "gas-prices/")
         else:
             candidates = GAS_PRICES_PATH_CANDIDATES
