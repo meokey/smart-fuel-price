@@ -932,3 +932,38 @@ def test_gaswizard_supported_cities_includes_gta():
     cities = AffordableEnergyCaProvider.get_supported_cities()
     assert "gta" in cities
     assert {"toronto", "mississauga", "vancouver", "calgary", "ottawa", "montreal"} <= set(cities)
+
+
+def test_cache_hit_preserves_failed_status():
+    """Regression: a TTL cache hit after a FAILED fetch must not whitewash
+    the status back to "ok" -- otherwise the per-device "Update status"
+    sensor reads OK for hours while the source is down (seen live: Calgary
+    "Last updated 7 hours ago" next to a bogus OK)."""
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
+    provider = GasBuddyStationProvider("205748", session=session)
+    provider.get_data()  # real fetch -> ok
+    assert provider.last_fetch_status == "ok"
+
+    # Simulate a failed fetch: fresh attempt, invalid result.
+    provider._last_attempt_at = datetime.now(timezone.utc)
+    provider._last_fetch_status = "error"
+
+    data = provider.get_data()  # TTL cache hit, no network
+    assert data["from_cache"] is True
+    assert session.post_count == 1
+    assert provider.last_fetch_status == "error"  # still honest
+
+
+def test_cache_hit_after_rate_limit_keeps_suggestion_signal():
+    """Same masking bug, rate-limited variant: the sensor's "raise the
+    cache threshold" hint keys off last_fetch_status == "rate_limited",
+    so a cache hit must not clear it either."""
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
+    provider = GasBuddyStationProvider("205748", session=session)
+    provider.get_data()
+
+    provider._last_attempt_at = datetime.now(timezone.utc)
+    provider._last_fetch_status = "rate_limited"
+
+    provider.get_data()  # cache hit
+    assert provider.last_fetch_status == "rate_limited"

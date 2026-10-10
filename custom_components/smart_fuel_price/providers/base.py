@@ -320,7 +320,13 @@ class BaseFuelPriceProvider(ABC):
             # cache hit by design makes no network attempt that could set
             # the status. (Seen live: "Last updated 5 hours ago" next to
             # "Update status Unknown".)
-            self._last_fetch_status = "ok"
+            # But a cache hit must not whitewash a FAILED source: if the
+            # last real attempt failed, keep reporting that failure --
+            # otherwise the status sensor reads "OK" for hours while the
+            # source is down and "Last updated" goes stale beside it.
+            # (Seen live: "Last updated 7 hours ago" next to a bogus OK.)
+            if self._last_fetch_status not in ("error", "rate_limited"):
+                self._last_fetch_status = "ok"
             self._last_fetch_was_forced = False
             cached = dict(self._cached_data)
             cached["from_cache"] = True
@@ -341,14 +347,25 @@ class BaseFuelPriceProvider(ABC):
         self._last_fetch_status = "rate_limited" if rate_limited else "error"
 
         if self.allow_stale_on_failure and self._cached_data is not None:
-            _LOGGER.info(
-                "[%s] Fetch failed; serving last cached data (stale).", self.name
+            # Warning (not info): a failing source is the reason "Last
+            # updated" goes stale -- it must be visible in the HA log.
+            _LOGGER.warning(
+                "[%s] Fetch failed for '%s' (%s); serving last cached data (stale).",
+                self.name,
+                self._city,
+                self._last_fetch_status,
             )
             stale = dict(self._cached_data)
             stale["from_cache"] = True
             stale["stale"] = True
             return stale
 
+        _LOGGER.warning(
+            "[%s] Fetch failed for '%s' (%s); no cached data to fall back on.",
+            self.name,
+            self._city,
+            self._last_fetch_status,
+        )
         data["from_cache"] = False
         return data
 
