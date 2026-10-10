@@ -967,3 +967,24 @@ def test_cache_hit_after_rate_limit_keeps_suggestion_signal():
 
     provider.get_data()  # cache hit
     assert provider.last_fetch_status == "rate_limited"
+
+
+def test_hydrate_cache_marks_status_ok():
+    """Regression: after a restart the provider hydrates its cache but
+    last_fetch_status stayed None, so the per-device "Update status"
+    sensor read Unknown until the first poll -- even though valid data
+    was being served (seen live in the device Activity log: Unknown right
+    after a restart, self-correcting to OK on the next poll)."""
+    session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
+    provider = GasBuddyStationProvider("205748", session=session)
+    provider.get_data()
+    assert provider.last_fetch_status == "ok"
+
+    fresh = GasBuddyStationProvider("205748", session=session)
+    assert fresh.last_fetch_status is None
+    fresh.hydrate_cache(
+        {"state": 165.9, "is_valid": True},
+        datetime.now(timezone.utc) - timedelta(minutes=39),
+    )
+    assert fresh.last_fetch_status == "ok"
+    assert fresh.last_successful_fetch is not None
