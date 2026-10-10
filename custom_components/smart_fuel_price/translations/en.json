@@ -13,7 +13,7 @@
         "description": "Configure {provider}.",
         "data": {
           "city": "City Name (e.g. mississauga, toronto)",
-          "station_ids": "Station ID(s), comma-separated. Find one at gasbuddy.com/gaspricemap -> click a station -> the number at the end of the URL (gasbuddy.com/station/<id>).",
+          "station_ids": "Station ID(s), comma-separated. Find one at gasbuddy.com/gaspricemap: click a station, the number at the end of its URL is the ID.",
           "fuel_grades": "Fuel grade(s) to track"
         }
       }

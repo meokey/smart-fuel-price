@@ -5,14 +5,13 @@
     "@meokey"
   ],
   "config_flow": true,
+  "dependencies": [],
   "documentation": "https://github.com/meokey/smart-fuel-price",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "version": "2.3.38",
+  "issue_tracker": "https://github.com/meokey/smart-fuel-price/issues",
   "requirements": [
-    "voluptuous",
-    "requests"
+    "voluptuous"
   ],
-  "dependencies": [],
-  "issue_tracker": "https://github.com/meokey/smart-fuel-price/issues"
+  "version": "2.3.38"
 }
