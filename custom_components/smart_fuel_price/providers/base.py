@@ -404,6 +404,14 @@ class BaseFuelPriceProvider(ABC):
             self._cached_data = dict(data)
             self._cached_at = fetched_at
             self._last_attempt_at = fetched_at
+            # Serving restored data is healthy: without this the "Update
+            # status" sensor sits at Unknown after every restart until the
+            # first poll, even though valid data is being served (seen
+            # live: status Unknown next to a correct "Last updated" right
+            # after a restart, self-correcting to OK on the next poll).
+            # The next real fetch attempt overwrites this with the true
+            # outcome, so a down source still surfaces as Failed then.
+            self._last_fetch_status = "ok"
 
     @abstractmethod
     def _parse_data(self) -> dict[str, Any]:
