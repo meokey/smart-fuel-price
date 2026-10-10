@@ -234,3 +234,51 @@ def test_has_gasbuddy_widget():
     page = '<script src="https://df.gasbuddy.com/feed.gdf?k=abc&i=12661"></script>'
     assert vendor_widgets.has_gasbuddy_widget(page) is True
     assert vendor_widgets.has_gasbuddy_widget("<html>no widget here</html>") is False
+
+
+# Modelled on halifax.citynews.ca/halifax-nova-scotia-gas-diesel-prices/
+# (confirmed live 2026-10-09): static tables embedded in the page, no JS
+# fetch. The paragraph before each table names "regular gas" or "diesel".
+HALIFAX_TABLES_HTML = """
+<p>Nova Scotia Energy Board says regular gas prices have increased 1.2
+cents to 192.9 cents per litre at local stations.</p>
+<table><thead><tr><td>Date</td><td>Change</td><td>Price</td></tr></thead>
+<tbody>
+<tr><td>Oct. 9</td><td>+1.2 cents</td><td>192.9</td></tr>
+<tr><td>Oct. 2</td><td>-2.0 cents</td><td>191.7</td></tr>
+</tbody></table>
+<p>Nova Scotia Energy Board used the interrupter; diesel fuel prices have
+decreased 5.0 cents to 260.5 per litre at local stations.</p>
+<table><thead><tr><td>Date</td><td>Change</td><td>Price</td></tr></thead>
+<tbody>
+<tr><td>Oct. 9</td><td>-5.0 cents</td><td>260.5</td></tr>
+<tr><td>Oct. 2</td><td>+3.6 cents</td><td>265.5</td></tr>
+</tbody></table>
+<table><thead><tr><td>Month</td><td>High</td><td>Low</td></tr></thead>
+<tbody><tr><td>September, 2026</td><td>199.1</td><td>188.5</td></tr></tbody></table>
+"""
+
+
+class TestParseHalifaxTables:
+    def test_regular_and_diesel_parsed(self):
+        result = vendor_widgets.parse_halifax_tables(HALIFAX_TABLES_HTML)
+        assert result is not None
+        assert result["is_valid"] is True
+        assert result["state"] == pytest.approx(192.9)
+        assert result["current_price"] == pytest.approx(192.9)
+        assert result["tomorrow_price"] is None
+        assert result["trend"] == "rising"
+        assert result["is_rising"] is True
+        assert result["regular_change"] == pytest.approx(1.2)
+        assert result["diesel_price"] == pytest.approx(260.5)
+        assert result["diesel_change"] == pytest.approx(-5.0)
+
+    def test_monthly_high_low_tables_ignored(self):
+        # The High/Low tables must not be mistaken for price tables.
+        html = HALIFAX_TABLES_HTML.replace(
+            "<td>Date</td><td>Change</td><td>Price</td>", "<td>Month</td><td>High</td><td>Low</td>"
+        )
+        assert vendor_widgets.parse_halifax_tables(html) is None
+
+    def test_no_tables_returns_none(self):
+        assert vendor_widgets.parse_halifax_tables("<html>no tables</html>") is None

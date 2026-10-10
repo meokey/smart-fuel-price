@@ -1,13 +1,18 @@
 {
   "domain": "smart_fuel_price",
   "name": "Smart Fuel Price",
-  "codeowners": ["@meokey"],
+  "codeowners": [
+    "@meokey"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/meokey/smart-fuel-price",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "version": "2.3.35",
-  "requirements": ["voluptuous", "requests"],
+  "version": "2.3.36",
+  "requirements": [
+    "voluptuous",
+    "requests"
+  ],
   "dependencies": [],
   "issue_tracker": "https://github.com/meokey/smart-fuel-price/issues"
 }

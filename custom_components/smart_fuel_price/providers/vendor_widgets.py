@@ -205,3 +205,83 @@ def parse_gasbuddy_report(page_html: str, page_url: str, get) -> dict[str, Any] 
             "feed_id": feed_id,
         }
     return None
+
+
+_HALIFAX_TABLE_RE = re.compile(r"<table[^>]*>(.*?)</table>", re.S | re.I)
+_HALIFAX_TABLE_ROW_RE = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S | re.I)
+_HALIFAX_TABLE_CELL_RE = re.compile(r"<t[dh][^>]*>(.*?)</t[dh]>", re.S | re.I)
+_HALIFAX_NUMBER_RE = re.compile(r"([+-]?[\d.]+)")
+
+
+def parse_halifax_tables(page_html: str) -> dict[str, Any] | None:
+    """Parse Halifax's static Date/Change/Price tables (regular + diesel).
+
+    Live-confirmed 2026-10-09 on halifax.citynews.ca's
+    "halifax-nova-scotia-gas-diesel-prices/" page (thanks to Bill's
+    DevTools catch -- the page has a non-standard slug, not
+    "{subdomain}-gas-prices/"). The data is embedded in the static HTML:
+    no JS fetch is needed (Network shows no XHR for the numbers).
+
+    Each table shares the Date/Change/Price headers; the paragraph just
+    before it names "regular gas" or "diesel", which is how the tables are
+    told apart. The first data row of each table is the latest entry.
+
+    Like the GasBuddy layout, this is a CURRENT price (set by the Nova
+    Scotia Energy Board), not a forecast: ``state`` is the latest regular
+    price and ``tomorrow_price`` is None. Diesel figures are returned as
+    extra keys (they surface as sensor attributes).
+    """
+    found: dict[str, dict[str, Any]] = {}
+    for table_match in _HALIFAX_TABLE_RE.finditer(page_html):
+        body = table_match.group(1)
+        rows = _HALIFAX_TABLE_ROW_RE.findall(body)
+        if not rows:
+            continue
+        header = [
+            re.sub(r"<[^>]+>", "", cell).strip().lower()
+            for cell in _HALIFAX_TABLE_CELL_RE.findall(rows[0])
+        ]
+        if header != ["date", "change", "price"]:
+            continue
+        before = re.sub(
+            r"<[^>]+>",
+            " ",
+            page_html[max(0, table_match.start() - 600) : table_match.start()],
+        ).lower()
+        kind = "diesel" if "diesel" in before else "regular"
+        if kind in found or len(rows) < 2:
+            continue
+        cells = [
+            re.sub(r"<[^>]+>", "", cell).strip()
+            for cell in _HALIFAX_TABLE_CELL_RE.findall(rows[1])
+        ]
+        if len(cells) != 3:
+            continue
+        date_str, change_str, price_str = cells
+        change_match = _HALIFAX_NUMBER_RE.search(change_str)
+        price_match = _HALIFAX_NUMBER_RE.search(price_str)
+        if not change_match or not price_match:
+            continue
+        found[kind] = {
+            "date": date_str,
+            "change": float(change_match.group(1)),
+            "price": float(price_match.group(1)),
+        }
+
+    regular = found.get("regular")
+    if not regular:
+        return None
+    result: dict[str, Any] = {
+        "state": regular["price"],
+        "tomorrow_price": None,
+        "current_price": regular["price"],
+        "effective_date_str": str(regular["date"]),
+        "is_valid": True,
+        "regular_change": regular["change"],
+        **trend_fields(regular["change"]),
+    }
+    diesel = found.get("diesel")
+    if diesel:
+        result["diesel_price"] = diesel["price"]
+        result["diesel_change"] = diesel["change"]
+    return result
