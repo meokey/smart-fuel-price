@@ -1,5 +1,6 @@
 {
   "name": "Smart Fuel Price",
+  "country": "CA",
   "render_readme": true,
   "hacs": "1.19.0",
   "zip_release": true,
