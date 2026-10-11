@@ -16,7 +16,7 @@ from .const import DOMAIN, CONF_PROVIDER, CONF_CITY, CONF_DISABLED_ATTRIBUTES
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
 
 # Legacy YAML entries must be a list of dicts. Coerce a lone dict-style
 # block into a single-entry list so async_setup's iteration below never
