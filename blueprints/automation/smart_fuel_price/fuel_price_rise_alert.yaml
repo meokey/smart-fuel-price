@@ -1,0 +1,64 @@
+blueprint:
+  name: Fuel Price Rise Alert (Smart Fuel Price)
+  description: >-
+    Get notified in the evening when tomorrow's fuel price is rising by at
+    least the configured amount. Fill up today, save money tomorrow.
+    Requires the Smart Fuel Price integration (buy-now binary sensor).
+  domain: automation
+  input:
+    buy_now_sensor:
+      name: Buy-now sensor
+      description: >-
+        The "Buy now" binary sensor from your Smart Fuel Price device
+        (e.g. binary_sensor.smart_fuel_price_toronto_buy_now).
+      selector:
+        entity:
+          domain: binary_sensor
+    rise_threshold:
+      name: Minimum rise to notify (¢/L)
+      description: Only notify when tomorrow's price is at least this much higher than today's.
+      default: 1.0
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 0.5
+          unit_of_measurement: "¢/L"
+    notify_time:
+      name: Notification time
+      description: What time in the evening to send the reminder.
+      default: "20:00:00"
+      selector:
+        time: {}
+    notify_service:
+      name: Notification service
+      description: e.g. notify.mobile_app_your_phone
+      default: "notify.notify"
+      selector:
+        text: {}
+
+variables:
+  buy_now_sensor: !input buy_now_sensor
+  rise_threshold: !input rise_threshold
+
+trigger:
+  - platform: time
+    at: !input notify_time
+
+condition:
+  - condition: state
+    entity_id: !input buy_now_sensor
+    state: "on"
+  - condition: template
+    value_template: >-
+      {{ state_attr(buy_now_sensor, 'price_delta') | float(0) >= rise_threshold | float(0) }}
+
+action:
+  - service: !input notify_service
+    data:
+      title: "⛽ Fuel price rising tomorrow"
+      message: >-
+        Fill up today! Tomorrow's price is
+        {{ state_attr(buy_now_sensor, 'price_delta') }}¢/L higher
+        ({{ state_attr(buy_now_sensor, 'current_price') }} →
+        {{ state_attr(buy_now_sensor, 'tomorrow_price') }} ¢/L).
