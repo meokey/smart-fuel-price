@@ -133,10 +133,84 @@ parsed), so the numbers can be checked against the source in one tap. The
 station's street address, city and province ride along as attributes on the
 price sensor.
 
-### Suggested dashboard layout
+### Dashboard cards & alerts
 
-For a Gas Wizard device, a vertical stack keeps the three related sensors
-together, with the button card below for a manual refresh:
+The integration ships a **Buy now** binary sensor per device (`on` = fill up
+today, `off` = wait for tomorrow, `unknown` = no forecast data). Here is how
+to put it on your dashboard — no HA expertise required.
+
+**Step 0 — Find your entity IDs.** Go to **Developer Tools → States**, type
+`buy_now` in the filter box. You will see something like
+`binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now`. Do the same for
+`tomorrow` / `today` to find the price sensors. Copy the IDs you need below.
+
+**Step 1 — Add a card.** Open your dashboard → **⋮ → Edit dashboard** →
+**+ Add card** → scroll down to **Manual** → paste one of the YAML snippets
+below → **Save**. Replace the example entity IDs with yours.
+
+**Card A — Decision hero** (needs
+[mushroom](https://github.com/piitaya/lovelace-mushroom): HACS → Frontend →
+search "mushroom" → Download):
+
+```yaml
+type: custom:mushroom-template-card
+entity: binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now
+primary: >-
+  {% if is_state('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'on') %}
+    ⛽ Fill up TODAY
+  {% elif is_state('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'off') %}
+    ⏳ Wait for tomorrow
+  {% else %}
+    ❓ No forecast data
+  {% endif %}
+secondary: >-
+  {% set d = state_attr('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'price_delta') %}
+  {% if d is not none %} Tomorrow {{ '+' if d > 0 else '' }}{{ d }}¢/L {% endif %}
+icon: mdi:fuel
+icon_color: >-
+  {% if is_state('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'on') %} red
+  {% elif is_state('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'off') %} green
+  {% else %} grey {% endif %}
+```
+
+**Card B — Price detail** (no extra install, plain markdown):
+
+```yaml
+type: markdown
+content: >-
+  {% set today = states('sensor.smart_fuel_price_toronto_gas_wizard_today_s_price') | float('?') %}
+  {% set tomorrow = states('sensor.smart_fuel_price_toronto_gas_wizard_tomorrow_s_forecast') | float('?') %}
+  ### ⛽ Toronto — Gas Wizard
+  | | Price |
+  |---|---|
+  | Today | **{{ today }}¢/L** |
+  | Tomorrow | **{{ tomorrow }}¢/L** {% if tomorrow is number and today is number %}{% if tomorrow > today %}🔺{% elif tomorrow < today %}🔻{% else %}➖{% endif %}{% endif %} |
+```
+
+**Card C — 7-day trend** (needs
+[mini-graph-card](https://github.com/kalkih/mini-graph-card): HACS → Frontend):
+
+```yaml
+type: custom:mini-graph-card
+entities:
+  - entity: sensor.smart_fuel_price_toronto_gas_wizard_tomorrow_s_forecast
+    name: Forecast
+  - entity: sensor.smart_fuel_price_toronto_gas_wizard_today_s_price
+    name: Today
+hours_to_show: 168
+```
+
+**Evening rise alert (blueprint).** Get a phone notification when tomorrow's
+price is rising: **Settings → Automations & Scenes → Blueprints → Import
+Blueprint**, paste this URL:
+
+`https://github.com/meokey/smart-fuel-price/blob/main/blueprints/automation/smart_fuel_price/fuel_price_rise_alert.yaml`
+
+Then create an automation from it: pick your buy-now sensor, the minimum
+rise (¢/L), the evening notification time, and your phone's notify service.
+
+**Classic layout.** A vertical stack keeps a device's sensors together, with
+the manual-refresh button below:
 
 ```yaml
 type: vertical-stack
@@ -153,6 +227,8 @@ cards:
 ```
 
 (Adjust the entity IDs to match your own device/city.)
+
+More examples live on the wiki: [Dashboard cards](https://github.com/meokey/smart-fuel-price/wiki/Dashboard-cards).
 
 ---
 
@@ -183,6 +259,7 @@ Every device carries three housekeeping entities plus its price sensors:
 
 | Entity | What it tells you |
 |---|---|
+| **Buy now** (binary sensor) | `on` = fill up today (tomorrow's price is higher), `off` = wait for tomorrow, `unknown` = no forecast data for this device. `price_delta` attribute shows the difference in ¢/L. |
 | **Last updated** | Timestamp of the last *successful* data fetch (automatic or manual). This is the true data-freshness signal. |
 | **Update status** | `OK` / `Rate limited` / `Failed` for the last fetch attempt. When automatic polls are rate-limited it also carries a `suggestion` attribute advising a higher cache threshold. |
 | **Manual refresh** (button) | Cache-bypassing fetch on demand. |
