@@ -14,6 +14,13 @@ import requests
 
 _LOGGER = logging.getLogger(__name__)
 
+# How long after a failed fetch (with nothing cached) an automatic
+# retry is suppressed. A failure seconds ago will almost certainly fail
+# the same way -- retrying per sensor/entity just hammers a struggling
+# source. Forced (manual) refreshes bypass this; the next scheduled
+# poll (15 min default) is far outside the window.
+_RETRY_COOLDOWN_SECONDS = 60
+
 
 class RateLimitedError(Exception):
     """Raised by providers when the source throttles us (HTTP 429, or 403
@@ -246,13 +253,13 @@ class BaseFuelPriceProvider(ABC):
         """
         return True
 
-    def fetch_data(self) -> dict[str, Any]:
+    def _blank_result(self) -> dict[str, Any]:
+        """Fail-safe default payload: no usable data.
+
+        Shared by ``fetch_data`` (before parsing) and the retry-cooldown
+        path in ``_get_data_locked``, so both report the same shape.
         """
-        Template method: Fetch and parse fuel price data securely.
-        Handles networking, timeouts, and exception boundaries.
-        """
-        # Fail-safe default values
-        result: dict[str, Any] = {
+        return {
             "state": None,  # signed price change in ¢/L (tomorrow - current)
             "tomorrow_price": None,  # forecast average, ¢/L
             "current_price": None,  # today's average, ¢/L
@@ -264,6 +271,14 @@ class BaseFuelPriceProvider(ABC):
             "provider_name": self.name,
             "city": self.city,
         }
+
+    def fetch_data(self) -> dict[str, Any]:
+        """
+        Template method: Fetch and parse fuel price data securely.
+        Handles networking, timeouts, and exception boundaries.
+        """
+        # Fail-safe default values
+        result: dict[str, Any] = self._blank_result()
 
         try:
             parsed_data = self._parse_data()
@@ -305,6 +320,9 @@ class BaseFuelPriceProvider(ABC):
           published (``tomorrow_pending``) counts as a healthy serving:
           today's price is fresh, so the status is ``ok`` and the
           timestamp updates; only the forecast sensors stay unknown.
+        - After a failed attempt with nothing cached, automatic retries
+          within 60s are suppressed (the failure would just repeat);
+          forced refreshes bypass this.
         - On a failed fetch with a warm cache: serve the stale payload
           (``from_cache: True, stale: True``) when
           ``allow_stale_on_failure`` is set, else the invalid result.
@@ -342,8 +360,26 @@ class BaseFuelPriceProvider(ABC):
             cached["from_cache"] = True
             return cached
 
+        last_attempt_at = self._last_attempt_at
         self._last_attempt_at = now
         self._last_fetch_was_forced = force_refresh
+        if (
+            not force_refresh
+            and self._cached_data is None
+            and self._last_fetch_status in ("error", "rate_limited")
+            and last_attempt_at is not None
+            and (now - last_attempt_at).total_seconds() < _RETRY_COOLDOWN_SECONDS
+        ):
+            # The last attempt just failed and there is nothing cached:
+            # another network call right now would almost certainly fail
+            # the same way (seen live: one Manual refresh fanning out
+            # into a fetch per sensor, each hitting the same timeout).
+            # Report the failure without hammering the source. Forced
+            # refreshes bypass this -- the user explicitly asked -- and
+            # the next scheduled poll is far outside the window.
+            data = self._blank_result()
+            data["from_cache"] = False
+            return data
         data = self.fetch_data()
         # Internal flags only -- must not leak into entity attributes.
         rate_limited = bool(data.pop("rate_limited", False))

@@ -1142,3 +1142,51 @@ def test_gaswizard_genuine_parse_failure_still_errors(caplog):
     assert provider.last_fetch_status == "error"
     assert provider.last_successful_fetch is None
     assert "tomorrow_pending" not in data
+
+
+def test_retry_cooldown_suppresses_immediate_refetch_after_failure():
+    # After a failed fetch with nothing cached, an automatic retry
+    # seconds later must not hit the network again -- the failure would
+    # just repeat (seen live: one Manual refresh fanning out into a
+    # fetch per sensor, each hitting the same timeout). A forced
+    # refresh bypasses the cooldown.
+    from unittest.mock import patch
+
+    session = FakeSession({})
+    provider = AffordableEnergyCaProvider("toronto", session=session)
+    calls = []
+
+    def boom():
+        calls.append(1)
+        raise requests.exceptions.ConnectTimeout("down")
+
+    with patch.object(provider, "_parse_data", boom):
+        d1 = provider.get_data()
+        d2 = provider.get_data()  # inside cooldown: no network
+        d3 = provider.get_data(force_refresh=True)  # forced: fetches
+
+    assert d1["is_valid"] is False
+    assert d2["is_valid"] is False
+    assert d2["from_cache"] is False
+    assert "tomorrow_pending" not in d2
+    assert provider.last_fetch_status == "error"
+    assert len(calls) == 2  # first attempt + forced; middle one suppressed
+
+
+def test_tomorrow_pending_requires_todays_price():
+    # Entries exist but neither today nor tomorrow is among them: the
+    # source is up, yet there is no fresh data to serve -- this must NOT
+    # take the healthy tomorrow_pending path.
+    html = _gaswizard_html(
+        (_TODAY - timedelta(days=2), "187.9", " ---"),
+        (_TODAY - timedelta(days=3), "187.9", " ---"),
+    )
+    session = FakeSession({"https://gaswizard.ca/gas-prices/toronto/": html})
+    provider = AffordableEnergyCaProvider("toronto", session=session)
+    data = provider.get_data()
+
+    assert data["is_valid"] is False
+    assert data["current_price"] is None
+    assert "tomorrow_pending" not in data
+    assert provider.last_fetch_status == "error"
+    assert provider.last_successful_fetch is None
