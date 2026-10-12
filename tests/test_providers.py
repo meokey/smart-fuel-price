@@ -888,8 +888,7 @@ def test_city_has_prices_soft404_excluded(monkeypatch):
 
 
 def test_city_has_prices_defaults_true():
-    # Providers with curated static lists keep everything.
-    assert AffordableEnergyCaProvider.city_has_prices("toronto") is True
+    # Providers without a probe keep everything.
     assert GasBuddyStationProvider.city_has_prices("whatever") is True
 
 
@@ -901,7 +900,15 @@ def test_filter_cities_with_prices_drops_and_fail_opens(monkeypatch):
             raise RuntimeError("probe blew up")
         return city != "edmonton"
 
-    monkeypatch.setattr(CityNewsCaProvider, "city_has_prices", classmethod(lambda cls, c: fake_has_prices(c)))
+    monkeypatch.setattr(
+        CityNewsCaProvider,
+        "city_has_prices",
+        classmethod(lambda cls, city, session=None: fake_has_prices(city)),
+    )
+    monkeypatch.setattr(
+        CityNewsCaProvider, "verified_cities", classmethod(lambda cls: frozenset())
+    )
+    monkeypatch.setattr("sfp_providers.base._PROBE_DELAY_SECONDS", 0)
     result = filter_cities_with_prices(
         CityNewsCaProvider, ["toronto", "edmonton", "boom", "calgary"]
     )
@@ -1190,3 +1197,64 @@ def test_tomorrow_pending_requires_todays_price():
     assert "tomorrow_pending" not in data
     assert provider.last_fetch_status == "error"
     assert provider.last_successful_fetch is None
+
+
+def test_filter_skips_verified_cities(monkeypatch):
+    """Cities in verified_cities() are trusted: no probe request at all."""
+    from sfp_providers.base import filter_cities_with_prices
+
+    probed = []
+
+    def fake_has_prices(cls, city, session=None):
+        probed.append(city)
+        return True
+
+    monkeypatch.setattr(
+        CityNewsCaProvider, "city_has_prices", classmethod(fake_has_prices)
+    )
+    monkeypatch.setattr(
+        CityNewsCaProvider,
+        "verified_cities",
+        classmethod(lambda cls: frozenset({"toronto"})),
+    )
+    monkeypatch.setattr("sfp_providers.base._PROBE_DELAY_SECONDS", 0)
+    result = filter_cities_with_prices(CityNewsCaProvider, ["toronto", "newcity"])
+    assert result == ["toronto", "newcity"]
+    assert probed == ["newcity"]
+
+
+def test_filter_shares_one_session_across_probes(monkeypatch):
+    """All probes in one filter run reuse a single session."""
+    from sfp_providers.base import filter_cities_with_prices
+
+    sessions = []
+
+    def fake_has_prices(cls, city, session=None):
+        sessions.append(session)
+        return True
+
+    monkeypatch.setattr(
+        CityNewsCaProvider, "city_has_prices", classmethod(fake_has_prices)
+    )
+    monkeypatch.setattr(
+        CityNewsCaProvider,
+        "_build_session",
+        classmethod(lambda cls: FakeSession({})),
+    )
+    monkeypatch.setattr(
+        CityNewsCaProvider, "verified_cities", classmethod(lambda cls: frozenset())
+    )
+    monkeypatch.setattr("sfp_providers.base._PROBE_DELAY_SECONDS", 0)
+    filter_cities_with_prices(CityNewsCaProvider, ["a", "b", "c"])
+    assert len(sessions) == 3
+    assert sessions[0] is sessions[1] is sessions[2]
+    assert sessions[0] is not None
+
+
+def test_gaswizard_verified_cities_covers_sitemap_slugs():
+    """The verified set must be sitemap slugs (what discovery returns)."""
+    from sfp_providers.affordableenergy_ca import CITY_SLUGS
+
+    assert len(AffordableEnergyCaProvider.verified_cities()) == 49
+    assert AffordableEnergyCaProvider.verified_cities() == frozenset(CITY_SLUGS)
+    assert "burnaby" not in AffordableEnergyCaProvider.verified_cities()

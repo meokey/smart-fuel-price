@@ -6,6 +6,7 @@ All data source plugins must inherit from this class.
 import logging
 import re
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from abc import ABC, abstractmethod
 from typing import Any
@@ -13,6 +14,11 @@ from typing import Any
 import requests
 
 _LOGGER = logging.getLogger(__name__)
+
+# Politeness delay between city-list probe requests (seconds). Probes run
+# rarely (1-week cache) and only for not-yet-verified cities, but when
+# they do, don't hammer the source.
+_PROBE_DELAY_SECONDS = 1.0
 
 # How long after a failed fetch (with nothing cached) an automatic
 # retry is suppressed. A failure seconds ago will almost certainly fail
@@ -243,13 +249,25 @@ class BaseFuelPriceProvider(ABC):
         return None
 
     @classmethod
-    def city_has_prices(cls, city: str) -> bool:
+    def verified_cities(cls) -> frozenset[str]:
+        """Cities already known to have price data.
+
+        ``filter_cities_with_prices`` skips these (no probe) and only
+        checks genuinely new discoveries. Default empty: every
+        discovered city is probed. Providers with a verified static list
+        return it here.
+        """
+        return frozenset()
+
+    @classmethod
+    def city_has_prices(cls, city: str, session: requests.Session | None = None) -> bool:
         """Whether a discovered city actually has price data to offer.
 
         Called to filter live-discovered city lists before they reach the
         config UI, so cities without a parseable price page never become
         selectable. Default True: providers with a curated static list
-        don't need this check.
+        don't need this check. ``session`` is a shared session provided
+        by the caller for politeness; implementations may ignore it.
         """
         return True
 
@@ -491,16 +509,35 @@ class BaseFuelPriceProvider(ABC):
 def filter_cities_with_prices(provider_cls, cities: list[str]) -> list[str]:
     """Drop cities that have no parseable price page (via city_has_prices).
 
+    Only cities NOT in the provider's verified set are probed -- the
+    verified ones were checked before and barely change, so re-probing
+    all of them on every refresh would be 50 requests for nothing (and a
+    rate-limit risk, correlated across users after a cache-version bump).
+    Probes share one session with a politeness delay between them.
+
     A probe that raises keeps the city (fail-open): one bad probe must
     not wipe the whole list.
     """
-    kept = []
-    for city in cities:
+    known_good = provider_cls.verified_cities()
+    to_probe = [c for c in cities if c not in known_good]
+    if not to_probe:
+        return list(cities)
+    probed_ok: set[str] = set()
+    session = provider_cls._build_session()
+    for i, city in enumerate(to_probe):
+        if i:
+            time.sleep(_PROBE_DELAY_SECONDS)
         try:
-            has = provider_cls.city_has_prices(city)
+            has = provider_cls.city_has_prices(city, session=session)
         except Exception:  # noqa: BLE001 -- fail-open, see above
-            kept.append(city)
+            probed_ok.add(city)
             continue
         if has:
-            kept.append(city)
-    return kept
+            probed_ok.add(city)
+        else:
+            _LOGGER.info(
+                "[%s] '%s' has no price data; excluded from the city list.",
+                provider_cls.__name__,
+                city,
+            )
+    return [c for c in cities if c in known_good or c in probed_ok]

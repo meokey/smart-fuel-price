@@ -168,7 +168,14 @@ class AffordableEnergyCaProvider(BaseFuelPriceProvider):
         return {slug: slug for slug in slugs}
 
     @classmethod
-    def city_has_prices(cls, city: str) -> bool:
+    def verified_cities(cls) -> frozenset[str]:
+        """The 49 slugs verified to have data (Oct 2026, twice)."""
+        return frozenset(CITY_SLUGS)
+
+    @classmethod
+    def city_has_prices(
+        cls, city: str, session: requests.Session | None = None
+    ) -> bool:
         """Structural probe: the page has at least one dated Regular entry.
 
         Date-independent on purpose -- Gas Wizard publishes tomorrow's
@@ -179,7 +186,7 @@ class AffordableEnergyCaProvider(BaseFuelPriceProvider):
         city (fail-open).
         """
         slug = CITY_MAP.get(city, city)
-        session = cls._build_session()
+        session = session or cls._build_session()
         resp = session.get(_GAS_PRICES_URL.format(slug=slug), timeout=10)
         resp.raise_for_status()
         return bool(_extract_entries(resp.text))

@@ -176,7 +176,7 @@ def test_happy_path_still_discovers_and_filters():
     cls = cf._PROVIDER_CLASSES["citynews_ca"]
     with patch.object(
         cls, "discover_cities", classmethod(lambda c: {"toronto": "T", "edmonton": "E"})
-    ), patch.object(cls, "city_has_prices", classmethod(lambda c, city: city != "edmonton")):
+    ), patch.object(cls, "city_has_prices", classmethod(lambda c, city, session=None: city != "edmonton")):
         cities = _cities("citynews_ca")
     assert cities == ["toronto"]
 
@@ -197,7 +197,7 @@ def test_store_version_mismatch_refreshes_instead_of_erroring(caplog):
     ), patch.object(
         cls, "discover_cities", classmethod(lambda c: {"toronto": "T"})
     ), patch.object(
-        cls, "city_has_prices", classmethod(lambda c, city: True)
+        cls, "city_has_prices", classmethod(lambda c, city, session=None: True)
     ), caplog.at_level(logging.INFO, logger="custom_components.smart_fuel_price.config_flow"):
         cities = _cities("affordableenergy_ca")
     assert cities == ["toronto"]
