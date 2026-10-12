@@ -139,14 +139,18 @@ The integration ships a **Buy now** binary sensor per device (`on` = fill up
 today, `off` = wait for tomorrow, `unknown` = no forecast data). Here is how
 to put it on your dashboard — no HA expertise required.
 
-**Step 0 — Find your entity IDs.** Go to **Developer Tools → States**, type
+**Step 0 — Find your entity IDs.** Go to **☰ → Settings → Tools → States**
+("Developer Tools" was renamed to "Tools" in recent HA versions), type
 `buy_now` in the filter box. You will see something like
 `binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now`. Do the same for
 `tomorrow` / `today` to find the price sensors. Copy the IDs you need below.
 
 **Step 1 — Add a card.** Open your dashboard → **⋮ → Edit dashboard** →
 **+ Add card** → scroll down to **Manual** → paste one of the YAML snippets
-below → **Save**. Replace the example entity IDs with yours.
+below → **Save**. Replace the example entity IDs with the real ones you
+copied in Step 0 (if a snippet mentions the sensor more than once, replace
+every occurrence). Tip: editing an existing card instead of adding a new
+one? Tap **Show code editor** (bottom-left) to reveal the YAML editor.
 
 **Card A — Decision hero** (needs
 [mushroom](https://github.com/piitaya/lovelace-mushroom): HACS → Frontend →
@@ -156,22 +160,26 @@ search "mushroom" → Download):
 type: custom:mushroom-template-card
 entity: binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now
 primary: >-
-  {% if is_state('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'on') %}
+  {% if is_state(entity, 'on') %}
     ⛽ Fill up TODAY
-  {% elif is_state('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'off') %}
+  {% elif is_state(entity, 'off') %}
     ⏳ Wait for tomorrow
   {% else %}
     ❓ No forecast data
   {% endif %}
 secondary: >-
-  {% set d = state_attr('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'price_delta') %}
+  {% set d = state_attr(entity, 'price_delta') %}
   {% if d is not none %} Tomorrow {{ '+' if d > 0 else '' }}{{ d }}¢/L {% endif %}
 icon: mdi:fuel
 icon_color: >-
-  {% if is_state('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'on') %} red
-  {% elif is_state('binary_sensor.smart_fuel_price_toronto_gas_wizard_buy_now', 'off') %} green
+  {% if is_state(entity, 'on') %} red
+  {% elif is_state(entity, 'off') %} green
   {% else %} grey {% endif %}
 ```
+
+The templates use the `entity` variable (the card's own `entity:` field),
+so the sensor name appears only once. In the visual editor that field is a
+dropdown — pick your buy-now sensor graphically, no typing needed.
 
 **Card B — Price detail** (no extra install, plain markdown):
 
