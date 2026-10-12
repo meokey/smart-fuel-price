@@ -255,6 +255,8 @@ More examples live on the wiki: [Dashboard cards](https://github.com/meokey/smar
 > Until then, its sensors show *unknown* rather than a stale value.
 >
 > **City list:** the Gas Wizard dropdown is built live from gaswizard.ca's sitemap at install/upgrade time (alphabetical). Of the 50 sitemap pages, **Burnaby** is the only one without forecast data, so it is automatically excluded -- if its page ever gains data, it will appear on its own after you reinstall or upgrade; no need to file an issue for new cities either.
+>
+> **Request politeness:** the integration only ever *reads* from sources. The city list is cached for a week, so sitemap + verification requests run rarely; only not-yet-verified cities are probed (usually just Burnaby -- a single request), sharing one connection with a 1-second gap between probes. Price fetches are cached (15 minutes by default, adjustable per entry), a manual refresh fetches once per provider, and a failed fetch is not retried for 60 seconds.
 
 ---
 

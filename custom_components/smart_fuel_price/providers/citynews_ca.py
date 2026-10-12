@@ -103,7 +103,14 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         return list(CITY_MAP.keys())
 
     @classmethod
-    def city_has_prices(cls, city: str) -> bool:
+    def verified_cities(cls) -> frozenset[str]:
+        """The static CITY_MAP keys, verified to have gas-prices pages."""
+        return frozenset(CITY_MAP)
+
+    @classmethod
+    def city_has_prices(
+        cls, city: str, session: requests.Session | None = None
+    ) -> bool:
         """Whether the city has a parseable gas-prices page.
 
         Cheap marker check (one plain GET per URL candidate): accepts the
@@ -113,7 +120,7 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         prices section at all (Oct 2026 probe). Cities with a non-standard
         page slug (Halifax) are probed at their explicit path.
         """
-        session = cls._build_session()
+        session = session or cls._build_session()
         city_info = CITY_MAP.get(city, {})
         custom_path = city_info.get("path")
         templates = (custom_path,) if custom_path else GAS_PRICES_PATH_CANDIDATES
