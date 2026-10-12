@@ -301,6 +301,10 @@ class BaseFuelPriceProvider(ABC):
           cached payload with ``from_cache: True`` -- no network call.
         - Otherwise fetch; on success the cache (data + timestamp) is
           refreshed.
+        - A fetch that succeeds but finds tomorrow's forecast not yet
+          published (``tomorrow_pending``) counts as a healthy serving:
+          today's price is fresh, so the status is ``ok`` and the
+          timestamp updates; only the forecast sensors stay unknown.
         - On a failed fetch with a warm cache: serve the stale payload
           (``from_cache: True, stale: True``) when
           ``allow_stale_on_failure`` is set, else the invalid result.
@@ -341,9 +345,24 @@ class BaseFuelPriceProvider(ABC):
         self._last_attempt_at = now
         self._last_fetch_was_forced = force_refresh
         data = self.fetch_data()
-        # Internal flag only -- must not leak into entity attributes.
+        # Internal flags only -- must not leak into entity attributes.
         rate_limited = bool(data.pop("rate_limited", False))
+        tomorrow_pending = bool(data.pop("tomorrow_pending", False))
         if data.get("is_valid"):
+            self._cached_data = dict(data)
+            self._cached_at = now
+            self._last_fetch_status = "ok"
+            data["from_cache"] = False
+            return data
+
+        if tomorrow_pending:
+            # The fetch succeeded and today's price is fresh; tomorrow's
+            # forecast simply isn't published yet (routine every
+            # afternoon before the evening publish). This is not a
+            # failure: record a healthy serving so "Last updated" and
+            # "Update status" stay truthful, and cache today's price for
+            # the TTL window. The forecast sensors still read Unknown
+            # from the None tomorrow_price/state.
             self._cached_data = dict(data)
             self._cached_at = now
             self._last_fetch_status = "ok"

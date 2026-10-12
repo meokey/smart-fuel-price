@@ -1094,3 +1094,51 @@ def test_gaswizard_source_url_canonical():
     assert legacy.source_url == "https://gaswizard.ca/gas-prices/vancouver-gas-prices/"
     future = AffordableEnergyCaProvider("some-future-city")
     assert future.source_url == "https://gaswizard.ca/gas-prices/some-future-city/"
+
+
+def test_gaswizard_forecast_not_published_yet_is_healthy_serving(caplog):
+    # get_data() (the path sensors actually use) must treat "forecast not
+    # published yet" as a healthy partial serving, not a failure:
+    # status ok, timestamp set, today's price cached -- only the
+    # forecast sensors stay unknown. (Live: "Last updated Unknown" next
+    # to a fresh Today's Price every afternoon.)
+    import logging
+
+    html = _gaswizard_html(
+        (_TODAY, "187.9", " ---"),
+        (_TODAY - timedelta(days=1), "187.9",
+         '<div class="price-direction pd-up"><span class="price-text">+2&#162;</span></div>'),
+    )
+    session = FakeSession({"https://gaswizard.ca/gas-prices/toronto/": html})
+    provider = AffordableEnergyCaProvider("toronto", session=session)
+    with caplog.at_level(logging.INFO):
+        data = provider.get_data()
+
+    assert data["is_valid"] is False
+    assert data["current_price"] == pytest.approx(187.9)
+    assert data["tomorrow_price"] is None
+    assert data["from_cache"] is False
+    # Internal flag must not leak into entity attributes.
+    assert "tomorrow_pending" not in data
+    assert provider.last_fetch_status == "ok"
+    assert provider.last_successful_fetch is not None
+    assert not [
+        r for r in caplog.records
+        if r.name == "sfp_providers.base" and r.levelno >= logging.WARNING
+    ]
+
+
+def test_gaswizard_genuine_parse_failure_still_errors(caplog):
+    # A page with no dated entries at all is a genuine failure: it must
+    # NOT take the tomorrow_pending healthy path.
+    import logging
+
+    session = FakeSession({"https://gaswizard.ca/gas-prices/toronto/": "<html></html>"})
+    provider = AffordableEnergyCaProvider("toronto", session=session)
+    with caplog.at_level(logging.INFO):
+        data = provider.get_data()
+
+    assert data["is_valid"] is False
+    assert provider.last_fetch_status == "error"
+    assert provider.last_successful_fetch is None
+    assert "tomorrow_pending" not in data

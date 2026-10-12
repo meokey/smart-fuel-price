@@ -254,6 +254,10 @@ class AffordableEnergyCaProvider(BaseFuelPriceProvider):
                 "state": None,
                 "tomorrow_price": None,
                 "current_price": current_cents,
+                # Internal flag (popped by base._get_data_locked, never
+                # surfaced): the fetch succeeded and today's price is
+                # fresh -- tomorrow's forecast just isn't published yet.
+                "tomorrow_pending": True,
             }
 
         tomorrow_cents = float(tomorrow_entry.group("price"))
