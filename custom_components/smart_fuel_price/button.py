@@ -53,13 +53,20 @@ class SmartFuelRefreshButton(ButtonEntity):
         )
 
     async def async_press(self) -> None:
-        """Fetch fresh data for each sensor on this device.
+        """Fetch fresh data once per unique provider on this device,
+        bypassing the TTL cache.
 
         Afterwards every sensor re-reads from the warmed cache so entities
-        sharing one provider can't end up showing different fetches.
+        sharing one provider can't end up showing different fetches -- and
+        a slow source is hit once, not once per sensor. (Seen live: 3
+        sequential forced fetches, each hitting a 10s read timeout.)
         """
+        refreshed: set = set()
         for sensor in self._sensors:
-            await sensor.async_force_refresh()
+            provider = sensor._provider
+            if provider not in refreshed:
+                refreshed.add(provider)
+                await sensor.async_force_refresh()
         for sensor in self._sensors:
             await sensor.async_update()
         # The manual fetch just ran -- reflect it on the device's
