@@ -248,17 +248,21 @@ class AffordableEnergyCaProvider(BaseFuelPriceProvider):
                 slug,
                 newest,
             )
-            return {
+            result = {
                 "city": slug,
                 "is_valid": False,
                 "state": None,
                 "tomorrow_price": None,
                 "current_price": current_cents,
+            }
+            if current_cents is not None:
                 # Internal flag (popped by base._get_data_locked, never
                 # surfaced): the fetch succeeded and today's price is
                 # fresh -- tomorrow's forecast just isn't published yet.
-                "tomorrow_pending": True,
-            }
+                # Without today's price this is a genuine (if soft)
+                # failure, not a healthy serving.
+                result["tomorrow_pending"] = True
+            return result
 
         tomorrow_cents = float(tomorrow_entry.group("price"))
         change_cents = (
