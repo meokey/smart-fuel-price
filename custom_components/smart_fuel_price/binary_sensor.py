@@ -1,7 +1,10 @@
 """Buy-now decision binary sensor for Smart Fuel Price.
 
 Follows the device structure built by sensor.py (same pattern as button.py):
-one binary sensor per device, reading the shared provider cache.
+one binary sensor per device *with forecast data*, reading the shared
+provider cache. Devices whose providers only report a current snapshot
+(GasBuddy, Halifax table layout) never get one -- it would sit at unknown
+forever.
 
 Decision rule (per device, first provider with a complete forecast wins):
 - tomorrow_price is None or current_price is None -> unknown
@@ -21,6 +24,7 @@ from typing import Any
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -111,19 +115,42 @@ class SmartFuelBuyNowSensor(BinarySensorEntity):
         )
 
 
+def _device_has_forecast(providers) -> bool:
+    """True when at least one provider can produce a tomorrow_price forecast.
+
+    Fail-open: providers without the flag are assumed forecast-capable.
+    """
+    return any(getattr(p, "supports_forecast", True) for p in providers)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up one buy-now sensor per device from a config entry."""
+    """Set up one buy-now sensor per device that has forecast data.
+
+    Devices whose providers only report a current snapshot (GasBuddy,
+    Halifax table layout) are skipped -- a Buy-now sensor there would sit
+    at unknown forever. Stale registry entries from older versions are
+    removed so they don't linger as dead entities.
+    """
     by_device = hass.data[DOMAIN].get("sensors", {}).get(config_entry.entry_id, {})
+    registry = er.async_get(hass)
     entities: list[SmartFuelBuyNowSensor] = []
     for device_key, info in by_device.items():
+        providers = info.get("providers", [])
+        unique_id = f"{device_key}_buy_now"
+        if not _device_has_forecast(providers):
+            if entity_id := registry.async_get_entity_id(
+                "binary_sensor", DOMAIN, unique_id
+            ):
+                registry.async_remove(entity_id)
+            continue
         entities.append(
             SmartFuelBuyNowSensor(
                 device_name=info["name"],
-                providers=info.get("providers", []),
+                providers=providers,
                 device_key=device_key,
                 model=info.get("model"),
                 configuration_url=info.get("configuration_url"),

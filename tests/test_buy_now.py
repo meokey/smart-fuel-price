@@ -3,6 +3,7 @@
 homeassistant isn't installed here, so we stub its modules (enough for
 binary_sensor to import) and drive the real _decide() with fake providers.
 """
+import asyncio
 import importlib.util
 import sys
 import types
@@ -61,6 +62,10 @@ sys.modules["homeassistant.helpers.entity"] = entity
 plat = types.ModuleType("homeassistant.helpers.entity_platform")
 plat.AddEntitiesCallback = object
 sys.modules["homeassistant.helpers.entity_platform"] = plat
+
+er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+er_mod.async_get = lambda hass: hass._registry
+sys.modules["homeassistant.helpers.entity_registry"] = er_mod
 
 # ---- load the integration package stand-in ----
 pkg = types.ModuleType("sfp_integration")
@@ -150,3 +155,106 @@ def test_all_unknown_when_nothing_usable():
     buy, delta, _ = _decide([FakeProvider({}), FakeProvider(exc=ValueError("x"))])
     assert buy is None
     assert delta is None
+
+
+# ---- issue #61: only forecast-capable devices get a Buy-now sensor ----
+
+class NoForecastProvider:
+    supports_forecast = False
+
+
+class ForecastProvider:
+    supports_forecast = True
+
+
+def test_device_has_forecast():
+    assert binary_sensor._device_has_forecast([ForecastProvider()]) is True
+    assert binary_sensor._device_has_forecast([NoForecastProvider()]) is False
+    # mixed device: one forecast-capable provider is enough
+    assert (
+        binary_sensor._device_has_forecast([NoForecastProvider(), ForecastProvider()])
+        is True
+    )
+    # fail-open: providers without the flag keep the old behavior
+    assert binary_sensor._device_has_forecast([FakeProvider({})]) is True
+    assert binary_sensor._device_has_forecast([]) is False
+
+
+class FakeRegistry:
+    def __init__(self):
+        self._entries = {}
+        self.removed = []
+
+    def async_get_entity_id(self, platform, domain, unique_id):
+        return self._entries.get((platform, domain, unique_id))
+
+    def async_remove(self, entity_id):
+        self.removed.append(entity_id)
+
+
+class FakeHass:
+    def __init__(self, by_device):
+        self.data = {"smart_fuel_price": {"sensors": {"entry1": by_device}}}
+        self._registry = FakeRegistry()
+
+
+class FakeEntry:
+    entry_id = "entry1"
+
+
+def test_setup_entry_skips_forecast_less_devices_and_cleans_registry():
+    async def go():
+        hass = FakeHass(
+            {
+                "dev_forecast": {
+                    "name": "Toronto",
+                    "providers": [ForecastProvider()],
+                },
+                "dev_snapshot": {
+                    "name": "Calgary",
+                    "providers": [NoForecastProvider()],
+                },
+            }
+        )
+        # stale entry left by a previous version on the snapshot device
+        hass._registry._entries[
+            ("binary_sensor", "smart_fuel_price", "dev_snapshot_buy_now")
+        ] = "binary_sensor.calgary_buy_now"
+        added = []
+        await binary_sensor.async_setup_entry(
+            hass,
+            FakeEntry(),
+            lambda entities, update_before_add=False: added.extend(entities),
+        )
+        assert [e._attr_unique_id for e in added] == ["dev_forecast_buy_now"]
+        assert hass._registry.removed == ["binary_sensor.calgary_buy_now"]
+
+    asyncio.run(go())
+
+
+def test_setup_entry_with_real_providers():
+    """Calgary (gasbuddy layout) skipped, Toronto (forecast) kept."""
+    from sfp_providers.citynews_ca import CityNewsCaProvider
+
+    async def go():
+        hass = FakeHass(
+            {
+                "dev_toronto": {
+                    "name": "Toronto",
+                    "providers": [CityNewsCaProvider("toronto")],
+                },
+                "dev_calgary": {
+                    "name": "Calgary",
+                    "providers": [CityNewsCaProvider("calgary")],
+                },
+            }
+        )
+        added = []
+        await binary_sensor.async_setup_entry(
+            hass,
+            FakeEntry(),
+            lambda entities, update_before_add=False: added.extend(entities),
+        )
+        assert [e._attr_unique_id for e in added] == ["dev_toronto_buy_now"]
+
+    asyncio.run(go())

@@ -988,3 +988,16 @@ def test_hydrate_cache_marks_status_ok():
     )
     assert fresh.last_fetch_status == "ok"
     assert fresh.last_successful_fetch is not None
+
+
+def test_supports_forecast_flags():
+    """Issue #61: only forecast-capable providers get a Buy-now sensor."""
+    # Forecast layouts.
+    assert CityNewsCaProvider("toronto").supports_forecast is True
+    assert CityNewsCaProvider("ottawa").supports_forecast is True
+    assert CityNewsCaProvider("kitchener").supports_forecast is True
+    assert AffordableEnergyCaProvider("toronto").supports_forecast is True
+    # Current-snapshot layouts: never a forecast.
+    assert CityNewsCaProvider("calgary").supports_forecast is False
+    assert CityNewsCaProvider("halifax").supports_forecast is False
+    assert GasBuddyStationProvider("205748").supports_forecast is False

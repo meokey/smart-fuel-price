@@ -135,7 +135,10 @@ price sensor.
 
 ### Dashboard cards & alerts
 
-The integration ships a **Buy now** binary sensor per device (`on` = fill up
+The integration ships a **Buy now** binary sensor per device with forecast
+data (CityNews forecast cities, Gas Wizard) — snapshot-only sources
+(GasBuddy, Halifax tables) can't predict, so they don't get one.
+(`on` = fill up
 today, `off` = wait for tomorrow, `unknown` = no forecast data). Here is how
 to put it on your dashboard — no HA expertise required.
 
@@ -267,7 +270,7 @@ Every device carries three housekeeping entities plus its price sensors:
 
 | Entity | What it tells you |
 |---|---|
-| **Buy now** (binary sensor) | `on` = fill up today (tomorrow's price is higher), `off` = wait for tomorrow, `unknown` = no forecast data for this device. `price_delta` attribute shows the difference in ¢/L. |
+| **Buy now** (binary sensor) | Only on devices with forecast data (CityNews forecast cities, Gas Wizard). `on` = fill up today (tomorrow's price is higher), `off` = wait for tomorrow, `unknown` = temporarily no forecast data. `price_delta` attribute shows the difference in ¢/L. |
 | **Last updated** | Timestamp of the last *successful* data fetch (automatic or manual). This is the true data-freshness signal. |
 | **Update status** | `OK` / `Rate limited` / `Failed` for the last fetch attempt. When automatic polls are rate-limited it also carries a `suggestion` attribute advising a higher cache threshold. |
 | **Manual refresh** (button) | Cache-bypassing fetch on demand. |

@@ -92,6 +92,12 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
         # reasoning as the GasBuddy station provider).
         return self._parser_hint() in _CURRENT_PRICE_PARSERS
 
+    @property
+    def supports_forecast(self) -> bool:
+        # Current-price layouts (GasBuddy widget replay, Halifax tables)
+        # never produce a forecast -- no Buy-now sensor for their devices.
+        return self._parser_hint() not in _CURRENT_PRICE_PARSERS
+
     @classmethod
     def get_supported_cities(cls) -> list[str]:
         return list(CITY_MAP.keys())
