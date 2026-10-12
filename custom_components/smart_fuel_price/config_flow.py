@@ -74,7 +74,20 @@ async def _get_cities_for_provider(hass, provider_key: str) -> list[str]:
 async def _get_cities_for_provider_unsafe(hass, provider_key: str, provider_cls) -> list[str]:
     """Inner city-list refresh; may raise (callers must handle)."""
     store = Store(hass, _CITY_CACHE_VERSION, _CITY_CACHE_KEY)
-    cache = await store.async_load() or {}
+    try:
+        cache = await store.async_load() or {}
+    except NotImplementedError:
+        # HA's Store raises NotImplementedError when the stored cache was
+        # written by an older cache version and no migration function was
+        # given. A version bump is our intentional invalidation: start
+        # fresh instead of erroring -- the refresh below repopulates and
+        # saves the current version, so this self-heals on the next run.
+        # (Seen live: stale v1 cache file raising on every config-flow
+        # open, with discovery never running again.)
+        _LOGGER.info(
+            "City-list cache was written by an older version; refreshing"
+        )
+        cache = {}
     entry = cache.get(provider_key)
 
     now = time.time()

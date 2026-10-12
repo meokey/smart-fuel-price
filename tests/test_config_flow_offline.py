@@ -179,3 +179,28 @@ def test_happy_path_still_discovers_and_filters():
     ), patch.object(cls, "city_has_prices", classmethod(lambda c, city: city != "edmonton")):
         cities = _cities("citynews_ca")
     assert cities == ["toronto"]
+
+
+def test_store_version_mismatch_refreshes_instead_of_erroring(caplog):
+    """HA's Store raises NotImplementedError when the stored cache was
+    written by an older version (no migration function given). That must
+    be treated as a cache miss -- refresh and re-save -- not an error
+    that kills discovery on every config-flow open."""
+    cls = cf._PROVIDER_CLASSES["affordableenergy_ca"]
+
+    class MigratingStore(Store):
+        async def async_load(self):
+            raise NotImplementedError
+
+    with patch(
+        "custom_components.smart_fuel_price.config_flow.Store", MigratingStore
+    ), patch.object(
+        cls, "discover_cities", classmethod(lambda c: {"toronto": "T"})
+    ), patch.object(
+        cls, "city_has_prices", classmethod(lambda c, city: True)
+    ), caplog.at_level(logging.INFO, logger="custom_components.smart_fuel_price.config_flow"):
+        cities = _cities("affordableenergy_ca")
+    assert cities == ["toronto"]
+    assert "falling back" not in caplog.text
+    # Self-healed: the refreshed cache was saved under the current version.
+    assert MigratingStore._db[(cf._CITY_CACHE_VERSION, cf._CITY_CACHE_KEY)]["affordableenergy_ca"]["cities"] == ["toronto"]
