@@ -45,21 +45,44 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import requests
+
 from .base import BaseFuelPriceProvider, trend_fields
 
 _LOGGER = logging.getLogger(__name__)
 
-# Only "toronto" and "gta" have been live-verified; the rest follow the
-# same URL pattern by inference (all appear in the site's own city list).
-CITY_MAP: dict[str, str] = {
-    "toronto": "toronto",
-    "mississauga": "mississauga",
-    "vancouver": "vancouver",
-    "calgary": "calgary",
-    "ottawa": "ottawa",
-    "montreal": "montreal",
-    "gta": "gta",
+# Canonical sitemap slugs, verified 2026-10-11/12 (#52): 49/50 have forecast
+# data. Burnaby is the sole exception (page exists, zero forecast entries)
+# and is intentionally absent -- see discover_cities()/city_has_prices():
+# if it ever gains data, it is picked up automatically, no code change.
+CITY_SLUGS: tuple[str, ...] = (
+    "barrie", "bathurst", "brampton", "burlington", "calgary",
+    "charlottetown", "coquitlam", "cornwall", "dartmouth", "edmonton",
+    "edmundston", "fredericton", "gta", "halifax", "hamilton", "kamloops",
+    "kelowna", "kingston", "london", "markham", "mississauga", "moncton",
+    "montreal", "new-glasgow", "niagara", "oakville", "oshawa", "ottawa",
+    "peterborough", "prince-george", "quebec-city", "regina", "richmond-2",
+    "saint-john-nb", "salmon-arm", "saskatoon", "st-catharines", "st-johns",
+    "sudbury", "surrey", "thunder-bay", "toronto", "vancouver-gas-prices",
+    "vaughan", "victoria", "waterloo", "windsor", "winnipeg", "yarmouth",
+)
+
+# Config entries created before v2.5.0 stored the old key "vancouver",
+# whose canonical sitemap slug is "vancouver-gas-prices".
+_LEGACY_CITY_ALIASES: dict[str, str] = {
+    "vancouver": "vancouver-gas-prices",
 }
+
+CITY_MAP: dict[str, str] = (
+    {slug: slug for slug in CITY_SLUGS} | _LEGACY_CITY_ALIASES
+)
+
+# Canonical page scheme (the old www.gaswizard.ca/<slug> 301-redirects here).
+_GAS_PRICES_URL = "https://gaswizard.ca/gas-prices/{slug}/"
+_SITEMAP_URL = "https://gaswizard.ca/gas-prices-sitemap.xml"
+_SITEMAP_LOC_RE = re.compile(
+    r"<loc>https://(?:www\.)?gaswizard\.ca/gas-prices/([^/<]+)/</loc>"
+)
 
 _PRICE_LIST_RE = re.compile(
     r'<ul class="single-city-prices[^"]*">(?P<body>.*?)</ul>', re.DOTALL
@@ -113,32 +136,65 @@ def _today_in_site_tz() -> "datetime.date":
 class AffordableEnergyCaProvider(BaseFuelPriceProvider):
     """Provider for Gas Wizard (gaswizard.ca)."""
 
-    BASE_URL = "https://www.gaswizard.ca"
-
     @property
     def name(self) -> str:
         return "Affordable Energy (Gas Wizard)"
 
     @classmethod
     def get_supported_cities(cls) -> list[str]:
-        return list(CITY_MAP.keys())
+        return sorted(CITY_SLUGS)
+
+    @classmethod
+    def discover_cities(cls) -> dict[str, str] | None:
+        """Live discovery via gaswizard.ca's sitemap (one cheap GET).
+
+        New sitemap cities flow into the config UI automatically (filtered
+        by city_has_prices, cached, refreshed on upgrade) -- no code change
+        and no issue-filing needed.
+        """
+        try:
+            session = cls._build_session()
+            resp = session.get(_SITEMAP_URL, timeout=10)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as err:
+            _LOGGER.warning(
+                "GasWizard city discovery failed, using static list: %s", err
+            )
+            return None
+        slugs = sorted(set(_SITEMAP_LOC_RE.findall(resp.text)))
+        if not slugs:
+            _LOGGER.warning("GasWizard sitemap had no city URLs; using static list.")
+            return None
+        return {slug: slug for slug in slugs}
+
+    @classmethod
+    def city_has_prices(cls, city: str) -> bool:
+        """Structural probe: the page has at least one dated Regular entry.
+
+        Date-independent on purpose -- Gas Wizard publishes tomorrow's
+        forecast on its own evening schedule, so a today-date check would
+        false-negative for much of the day. Burnaby (zero entries) is
+        filtered here; if it ever gains data it passes automatically.
+        Network failures propagate: filter_cities_with_prices keeps the
+        city (fail-open).
+        """
+        slug = CITY_MAP.get(city, city)
+        session = cls._build_session()
+        resp = session.get(_GAS_PRICES_URL.format(slug=slug), timeout=10)
+        resp.raise_for_status()
+        return bool(_extract_entries(resp.text))
 
     @property
     def source_url(self) -> str | None:
-        slug = CITY_MAP.get(self.city, CITY_MAP["toronto"])
-        return f"{self.BASE_URL}/{slug}"
+        slug = CITY_MAP.get(self.city, self.city)
+        return _GAS_PRICES_URL.format(slug=slug)
 
     def _parse_data(self) -> dict[str, Any]:
-        slug = CITY_MAP.get(self.city)
-        if not slug:
-            _LOGGER.warning(
-                "[%s] City '%s' is not in the known map; falling back to 'toronto'.",
-                self.name,
-                self.city,
-            )
-            slug = CITY_MAP["toronto"]
+        # Discovered-but-not-curated cities use their sitemap slug directly;
+        # legacy config keys resolve via _LEGACY_CITY_ALIASES in CITY_MAP.
+        slug = CITY_MAP.get(self.city, self.city)
 
-        url = f"{self.BASE_URL}/{slug}"
+        url = _GAS_PRICES_URL.format(slug=slug)
         page_html = self._get(url).text
 
         entries = _extract_entries(page_html)
