@@ -125,6 +125,12 @@ class BaseFuelPriceProvider(ABC):
     # forecast would be actively misleading.
     allow_stale_on_failure: bool = False
 
+    # When False, this provider only reports a current snapshot and can never
+    # produce a tomorrow_price forecast (e.g. GasBuddy live prices, Halifax
+    # static tables). The Buy-now binary sensor is not created for such
+    # devices -- it would sit at unknown forever.
+    supports_forecast: bool = True
+
     def __init__(
         self,
         city: str,

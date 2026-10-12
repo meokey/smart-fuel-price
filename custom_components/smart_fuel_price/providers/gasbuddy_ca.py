@@ -124,6 +124,10 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
     _station_cache: dict[str, tuple[float, dict]] = {}
     _CACHE_TTL_SECONDS = 20 * 60  # a bit under the 30-min scan_interval
 
+    # A live snapshot, not a forecast: tomorrow_price is always None, so a
+    # Buy-now sensor would sit at unknown forever -- don't create one.
+    supports_forecast: bool = False
+
     # CSRF token cache, also process-wide: {token, fetched_at_epoch}.
     _csrf_token: str | None = None
     _csrf_fetched_at: float = 0.0
