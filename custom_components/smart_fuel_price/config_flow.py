@@ -97,6 +97,22 @@ async def _get_cities_for_provider_unsafe(hass, provider_key: str, provider_cls)
 
     discovered = await hass.async_add_executor_job(provider_cls.discover_cities)
     if discovered:
+        # Maintainer observability: delta probing trusts the verified set,
+        # so a city removed from the source would otherwise go unnoticed
+        # (the dropdown just follows the sitemap). A partial/broken
+        # discovery could false-positive here; it self-resolves on the
+        # next successful refresh.
+        removed = sorted(set(provider_cls.verified_cities()) - set(discovered))
+        if removed:
+            _LOGGER.warning(
+                "City list change for provider '%s': %d verified %s no "
+                "longer in the discovery source: %s. If this persists, "
+                "the curated city list may need updating.",
+                provider_key,
+                len(removed),
+                "city" if len(removed) == 1 else "cities",
+                ", ".join(removed),
+            )
         cities = sorted(discovered.keys())
         cities = await hass.async_add_executor_job(
             filter_cities_with_prices, provider_cls, cities

@@ -204,3 +204,34 @@ def test_store_version_mismatch_refreshes_instead_of_erroring(caplog):
     assert "falling back" not in caplog.text
     # Self-healed: the refreshed cache was saved under the current version.
     assert MigratingStore._db[(cf._CITY_CACHE_VERSION, cf._CITY_CACHE_KEY)]["affordableenergy_ca"]["cities"] == ["toronto"]
+
+
+def test_sitemap_removal_warns(caplog):
+    cls = cf._PROVIDER_CLASSES["affordableenergy_ca"]
+    with patch.object(
+        cls, "discover_cities", classmethod(lambda c: {"toronto": "Toronto"})
+    ), caplog.at_level(
+        logging.WARNING, logger="custom_components.smart_fuel_price.config_flow"
+    ):
+        cities = _cities("affordableenergy_ca")
+    assert cities == ["toronto"]
+    assert "no longer in the discovery source" in caplog.text
+    assert "vancouver-gas-prices" in caplog.text
+
+
+def test_sitemap_no_removal_no_warning(caplog):
+    cls = cf._PROVIDER_CLASSES["affordableenergy_ca"]
+    discovered = {s: s for s in cls.verified_cities()} | {"burnaby": "Burnaby"}
+    with patch.object(
+        cls, "discover_cities", classmethod(lambda c: discovered)
+    ), patch.object(
+        cls,
+        "city_has_prices",
+        classmethod(lambda c, city, session=None: False),
+    ), caplog.at_level(
+        logging.WARNING, logger="custom_components.smart_fuel_price.config_flow"
+    ):
+        cities = _cities("affordableenergy_ca")
+    # burnaby probed (unverified) and dropped; verified kept; no warning.
+    assert set(cities) == set(cls.verified_cities())
+    assert "no longer in the discovery source" not in caplog.text
