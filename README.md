@@ -247,12 +247,14 @@ More examples live on the wiki: [Dashboard cards](https://github.com/meokey/smar
 
 | Provider Identifier | Target Region | Dynamic Cities Supported |
 | :--- | :--- | :--- |
-| `affordableenergy_ca` | Canada (Nationwide) | `toronto`, `mississauga`, `vancouver`, `calgary`, `ottawa`, `montreal`, `gta` -- all confirmed live |
+| `affordableenergy_ca` | Canada (Nationwide) | 49 cities -- every gaswizard.ca forecast page with data (verified Oct 2026; see note below) |
 | `citynews_ca` | Canada Major Cities | `toronto`, `ottawa`, `kitchener` (next-day forecast) + `calgary` (current average via the GasBuddy widget -- no forecast) + `halifax` (current regular average + diesel price, static tables -- no forecast) |
 | `gasbuddy_ca` | Any station, anywhere GasBuddy has data (GTA included) | N/A -- configured by station ID, not a fixed city list; see [GasBuddy section](#gasbuddy-per-station) below |
 
 > **Note:** Gas Wizard publishes tomorrow's forecast on its own schedule (usually by the evening).
 > Until then, its sensors show *unknown* rather than a stale value.
+>
+> **City list:** the Gas Wizard dropdown is built live from gaswizard.ca's sitemap at install/upgrade time (alphabetical). Of the 50 sitemap pages, **Burnaby** is the only one without forecast data, so it is automatically excluded -- if its page ever gains data, it will appear on its own after you reinstall or upgrade; no need to file an issue for new cities either.
 
 ---
 

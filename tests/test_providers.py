@@ -102,7 +102,7 @@ CITYNEWS_KITCHENER_HTML = (
 )
 
 def test_gaswizard_toronto_end_to_end():
-    session = FakeSession({"https://www.gaswizard.ca/toronto": GASWIZARD_TORONTO_HTML})
+    session = FakeSession({"https://gaswizard.ca/gas-prices/toronto/": GASWIZARD_TORONTO_HTML})
     data = AffordableEnergyCaProvider("toronto", session=session).fetch_data()
 
     assert data["is_valid"] is True
@@ -135,7 +135,7 @@ def test_citynews_kitchener_no_change_end_to_end():
 
 
 def test_gaswizard_layout_change_fails_soft():
-    session = FakeSession({"https://www.gaswizard.ca/toronto": "<html>redesigned</html>"})
+    session = FakeSession({"https://gaswizard.ca/gas-prices/toronto/": "<html>redesigned</html>"})
     data = AffordableEnergyCaProvider("toronto", session=session).fetch_data()
 
     assert data["is_valid"] is False
@@ -219,7 +219,7 @@ GASWIZARD_NO_CHANGE_HTML = _gaswizard_html(
 
 
 def test_gaswizard_no_change_day_still_parses():
-    session = FakeSession({"https://www.gaswizard.ca/toronto": GASWIZARD_NO_CHANGE_HTML})
+    session = FakeSession({"https://gaswizard.ca/gas-prices/toronto/": GASWIZARD_NO_CHANGE_HTML})
     data = AffordableEnergyCaProvider("toronto", session=session).fetch_data()
 
     assert data["is_valid"] is True
@@ -239,7 +239,7 @@ def test_gaswizard_forecast_not_published_yet(caplog):
         (_TODAY - timedelta(days=1), "187.9",
          '<div class="price-direction pd-up"><span class="price-text">+2&#162;</span></div>'),
     )
-    session = FakeSession({"https://www.gaswizard.ca/toronto": html})
+    session = FakeSession({"https://gaswizard.ca/gas-prices/toronto/": html})
     data = AffordableEnergyCaProvider("toronto", session=session).fetch_data()
 
     assert data["is_valid"] is False
@@ -558,7 +558,7 @@ def test_city_lists_are_well_formed():
 
 def _valid_gaswizard_provider(session=None):
     session = session or FakeSession(
-        {"https://www.gaswizard.ca/toronto": GASWIZARD_TORONTO_HTML}
+        {"https://gaswizard.ca/gas-prices/toronto/": GASWIZARD_TORONTO_HTML}
     )
     provider = AffordableEnergyCaProvider("toronto", session=session)
     provider.cache_ttl = timedelta(minutes=60)
@@ -618,7 +618,7 @@ def test_gaswizard_does_not_serve_stale_forecast():
         (_TODAY, "187.9", " ---"),
         (_TODAY - timedelta(days=1), "187.9", " ---"),
     )
-    provider._session = FakeSession({"https://www.gaswizard.ca/toronto": today_only})
+    provider._session = FakeSession({"https://gaswizard.ca/gas-prices/toronto/": today_only})
     provider._last_attempt_at = None  # force a real refetch
     data = provider.get_data()
     assert data["is_valid"] is False
@@ -740,12 +740,13 @@ def test_gasbuddy_source_url_points_at_station_page():
 def test_gaswizard_source_url_points_at_city_page():
     assert (
         AffordableEnergyCaProvider("toronto").source_url
-        == "https://www.gaswizard.ca/toronto"
+        == "https://gaswizard.ca/gas-prices/toronto/"
     )
-    # Unknown city falls back to the toronto slug, like _parse_data does.
+    # Unknown city uses its own name as slug (e.g. newly discovered sitemap
+    # cities not yet in the curated map), like _parse_data does.
     assert (
         AffordableEnergyCaProvider("atlantis").source_url
-        == "https://www.gaswizard.ca/toronto"
+        == "https://gaswizard.ca/gas-prices/atlantis/"
     )
 
 
@@ -838,7 +839,7 @@ def test_gaswizard_matches_entries_by_date_not_position():
         (_TODAY + timedelta(days=1), "188.9",
          '<div class="price-direction pd-up"><span class="price-text">+1&#162;</span></div>'),
     )
-    session = FakeSession({"https://www.gaswizard.ca/toronto": html})
+    session = FakeSession({"https://gaswizard.ca/gas-prices/toronto/": html})
     data = AffordableEnergyCaProvider("toronto", session=session).fetch_data()
 
     assert data["is_valid"] is True
@@ -916,9 +917,9 @@ def test_gaswizard_gta_end_to_end():
         (_TODAY, "185.9",
          '<div class="price-direction pd-down"><span class="price-text">-2&#162;</span></div>'),
     )
-    session = FakeSession({"https://www.gaswizard.ca/gta": html})
+    session = FakeSession({"https://gaswizard.ca/gas-prices/gta/": html})
     provider = AffordableEnergyCaProvider("gta", session=session)
-    assert provider.source_url == "https://www.gaswizard.ca/gta"
+    assert provider.source_url == "https://gaswizard.ca/gas-prices/gta/"
 
     data = provider.fetch_data()
     assert data["is_valid"] is True
@@ -931,7 +932,7 @@ def test_gaswizard_gta_end_to_end():
 def test_gaswizard_supported_cities_includes_gta():
     cities = AffordableEnergyCaProvider.get_supported_cities()
     assert "gta" in cities
-    assert {"toronto", "mississauga", "vancouver", "calgary", "ottawa", "montreal"} <= set(cities)
+    assert {"toronto", "mississauga", "vancouver-gas-prices", "calgary", "ottawa", "montreal"} <= set(cities)
 
 
 def test_cache_hit_preserves_failed_status():
@@ -1001,3 +1002,95 @@ def test_supports_forecast_flags():
     assert CityNewsCaProvider("calgary").supports_forecast is False
     assert CityNewsCaProvider("halifax").supports_forecast is False
     assert GasBuddyStationProvider("205748").supports_forecast is False
+
+
+def test_gaswizard_static_city_list():
+    """Issue #53: 49 verified slugs, sorted, Burnaby excluded."""
+    from sfp_providers.affordableenergy_ca import CITY_MAP
+
+    cities = AffordableEnergyCaProvider.get_supported_cities()
+    assert len(cities) == 49
+    assert cities == sorted(cities)
+    assert "burnaby" not in cities
+    assert "toronto" in cities and "gta" in cities
+    # legacy config key still resolves (entries created before v2.5.0)
+    assert CITY_MAP["vancouver"] == "vancouver-gas-prices"
+
+
+def test_gaswizard_discover_cities(monkeypatch):
+    sitemap = """<?xml version="1.0"?><urlset>
+    <url><loc>https://gaswizard.ca/gas-prices/toronto/</loc></url>
+    <url><loc>https://gaswizard.ca/gas-prices/burnaby/</loc></url>
+    </urlset>"""
+
+    class S:
+        def get(self, url, **kw):
+            assert url == "https://gaswizard.ca/gas-prices-sitemap.xml"
+            return FakeResponse(sitemap)
+
+    monkeypatch.setattr(
+        AffordableEnergyCaProvider, "_build_session", classmethod(lambda cls: S())
+    )
+    assert AffordableEnergyCaProvider.discover_cities() == {
+        "burnaby": "burnaby",
+        "toronto": "toronto",
+    }
+
+
+def test_gaswizard_discover_cities_failure_returns_none(monkeypatch):
+    class S:
+        def get(self, url, **kw):
+            raise requests.exceptions.ConnectionError("down")
+
+    monkeypatch.setattr(
+        AffordableEnergyCaProvider, "_build_session", classmethod(lambda cls: S())
+    )
+    assert AffordableEnergyCaProvider.discover_cities() is None
+
+
+def test_gaswizard_city_has_prices_probe(monkeypatch):
+    good = (
+        '<ul class="single-city-prices "><li><div>'
+        '<span class="daytext">Monday</span> - '
+        '<span class="datetext">Oct 12, 2026</span></div>'
+        '<div class="fueltype"><div class="fueltitle">Regular</div>'
+        '<div class="fuelprice"><span class="fuel-price-value">181.9</span>'
+        "</div></div></li></ul>"
+    )
+    pages = {
+        "https://gaswizard.ca/gas-prices/toronto/": good,
+        "https://gaswizard.ca/gas-prices/burnaby/": '<ul class="single-city-prices "></ul>',
+    }
+
+    class S:
+        def get(self, url, **kw):
+            return FakeResponse(pages[url])
+
+    monkeypatch.setattr(
+        AffordableEnergyCaProvider, "_build_session", classmethod(lambda cls: S())
+    )
+    assert AffordableEnergyCaProvider.city_has_prices("toronto") is True
+    assert AffordableEnergyCaProvider.city_has_prices("burnaby") is False
+
+
+def test_gaswizard_city_has_prices_propagates_network_error(monkeypatch):
+    """Fail-open is handled by filter_cities_with_prices, so propagate."""
+
+    class S:
+        def get(self, url, **kw):
+            raise requests.exceptions.ConnectionError("down")
+
+    monkeypatch.setattr(
+        AffordableEnergyCaProvider, "_build_session", classmethod(lambda cls: S())
+    )
+    with pytest.raises(requests.exceptions.ConnectionError):
+        AffordableEnergyCaProvider.city_has_prices("toronto")
+
+
+def test_gaswizard_source_url_canonical():
+    p = AffordableEnergyCaProvider("toronto")
+    assert p.source_url == "https://gaswizard.ca/gas-prices/toronto/"
+    legacy = AffordableEnergyCaProvider("vancouver")
+    assert legacy.source_url == "https://gaswizard.ca/gas-prices/vancouver-gas-prices/"
+    future = AffordableEnergyCaProvider("some-future-city")
+    assert future.source_url == "https://gaswizard.ca/gas-prices/some-future-city/"
