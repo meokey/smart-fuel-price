@@ -1,4 +1,4 @@
-"""Syntax validation for every Python file in the integration.
+"""Syntax validation for every Python file in the integration and scripts/.
 
 Unlike test_all_provider_modules_import_cleanly (which needs modules to
 actually import successfully, and therefore can't cover config_flow.py,
@@ -17,14 +17,25 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMPONENT_ROOT = REPO_ROOT / "custom_components" / "smart_fuel_price"
+SCRIPTS_ROOT = REPO_ROOT / "scripts"
 
 
 def _all_python_files():
-    return sorted(COMPONENT_ROOT.rglob("*.py"))
+    files = sorted(COMPONENT_ROOT.rglob("*.py"))
+    if SCRIPTS_ROOT.is_dir():
+        files += sorted(SCRIPTS_ROOT.glob("*.py"))
+    return files
+
+
+def _display(path: Path) -> str:
+    try:
+        return str(path.relative_to(COMPONENT_ROOT))
+    except ValueError:
+        return str(path.relative_to(REPO_ROOT))
 
 
 @pytest.mark.parametrize(
-    "path", _all_python_files(), ids=lambda p: str(p.relative_to(COMPONENT_ROOT))
+    "path", _all_python_files(), ids=_display
 )
 def test_python_file_has_valid_syntax(path):
     source = path.read_text(encoding="utf-8")
