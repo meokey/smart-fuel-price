@@ -1,0 +1,43 @@
+name: Docs
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "scripts/**"
+      - "custom_components/**"
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "scripts/**"
+      - "custom_components/**"
+
+permissions:
+  contents: read
+
+jobs:
+  generated-freshness:
+    name: Generated docs are fresh
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install requests
+      - run: python scripts/gen_docs.py
+      - name: Fail if generated docs are stale
+        run: git diff --exit-code -- docs/
+
+  hygiene:
+    name: Mermaid + version markers
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python scripts/check_mermaid.py docs/
+      - run: python scripts/check_doc_versions.py

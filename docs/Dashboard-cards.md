@@ -1,0 +1,112 @@
+# Dashboard Cards
+
+Three ready-to-paste Lovelace cards for Smart Fuel Price, inspired by the
+[gasbuddy-card](https://github.com/firstof9/gasbuddy-card) design
+(header + price tiles + trend sparkline). Replace the example entity IDs
+with yours — find them under **☰ → Settings → Tools → States** (they look like
+`sensor.smart_fuel_price_gta_tomorrow_s_forecast`).
+
+The examples below use a Gas Wizard GTA device:
+- `binary_sensor.smart_fuel_price_gta_buy_now` — the buy-now decision
+- `sensor.smart_fuel_price_gta_today_s_price` — today's price
+- `sensor.smart_fuel_price_gta_tomorrow_s_forecast` — tomorrow's forecast
+- `sensor.smart_fuel_price_gta_last_updated` — last successful fetch
+
+---
+
+## 1. Decision hero (mushroom-template-card)
+
+Big, glanceable: should you fill up today? Requires
+[mushroom](https://github.com/piitaya/lovelace-mushroom) (HACS → Frontend).
+
+```yaml
+type: custom:mushroom-template-card
+entity: binary_sensor.smart_fuel_price_gta_buy_now
+primary: >-
+  {% if is_state(entity, 'on') %}
+    ⛽ Fill up TODAY
+  {% elif is_state(entity, 'off') %}
+    ⏳ Wait for tomorrow
+  {% else %}
+    ❓ No forecast data
+  {% endif %}
+secondary: >-
+  {% set d = state_attr(entity, 'price_delta') %}
+  {% if d is not none %}
+    Tomorrow {{ '+' if d > 0 else '' }}{{ d }}¢/L
+  {% endif %}
+icon: mdi:fuel
+icon_color: >-
+  {% if is_state(entity, 'on') %} red
+  {% elif is_state(entity, 'off') %} green
+  {% else %} grey {% endif %}
+tap_action:
+  action: more-info
+```
+
+The templates use the `entity` variable (the card's own `entity:` field),
+so the sensor name appears only once — and in the visual editor that field
+is a dropdown, so you can pick the sensor graphically instead of typing it.
+
+## 2. Price detail (markdown)
+
+gasbuddy-card-style price tiles: today vs tomorrow, trend arrow, freshness.
+
+```yaml
+type: markdown
+content: >-
+  {% set today = states('sensor.smart_fuel_price_gta_today_s_price') | float('?') %}
+  {% set tomorrow = states('sensor.smart_fuel_price_gta_tomorrow_s_forecast') | float('?') %}
+  {% set updated = states('sensor.smart_fuel_price_gta_last_updated') %}
+  ### ⛽ GTA — Gas Wizard
+
+  | | Price |
+  |---|---|
+  | Today | **{{ today }}¢/L** |
+  | Tomorrow | **{{ tomorrow }}¢/L** {% if tomorrow is number and today is number %}{% if tomorrow > today %}🔺{% elif tomorrow < today %}🔻{% else %}➖{% endif %}{% endif %} |
+
+  <sub>Updated {{ as_timestamp(updated) | timestamp_custom('%-m/%-d %H:%M') if updated not in ['unknown','unavailable'] else '—' }}</sub>
+```
+
+## 3. Trend sparkline (mini-graph-card)
+
+Like gasbuddy-card's `show_trend`: a 7-day price history behind the
+current value. Requires
+[mini-graph-card](https://github.com/kalkih/mini-graph-card) (HACS → Frontend).
+Our price sensors carry `state_class: measurement`, so HA records history
+natively — no extra setup.
+
+```yaml
+type: custom:mini-graph-card
+entities:
+  - entity: sensor.smart_fuel_price_gta_tomorrow_s_forecast
+    name: Forecast
+  - entity: sensor.smart_fuel_price_gta_today_s_price
+    name: Today
+hours_to_show: 168
+points_per_hour: 0.25
+line_width: 2
+show:
+  labels: true
+  average: true
+```
+
+No mini-graph-card? The built-in `history-graph` works too:
+
+```yaml
+type: history-graph
+entities:
+  - sensor.smart_fuel_price_gta_tomorrow_s_forecast
+  - sensor.smart_fuel_price_gta_today_s_price
+hours_to_show: 168
+```
+
+---
+
+## Blueprint: evening rise alert
+
+Pair the cards with the
+[Fuel Price Rise Alert blueprint](../blob/main/blueprints/automation/smart_fuel_price/fuel_price_rise_alert.yaml):
+every evening at your chosen time, you get a phone notification when
+tomorrow's price is rising. Import it via **Settings → Automations →
+Blueprints → Import Blueprint** and paste the raw YAML URL.
