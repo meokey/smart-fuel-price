@@ -5,11 +5,11 @@ Welcome! This wiki holds the detailed documentation for the
 integration — Canadian fuel price forecasts (Gas Wizard, CityNews) and live
 per-station prices (GasBuddy).
 
-- [[Installation]] — HACS (custom repository) or manual install
-- [[Configuration]] — config flow, options flow, cache threshold
-- [[Providers]] — data sources, city coverage, units
-- [[Troubleshooting]] — common problems and fixes
-- [[FAQ]] — questions from real users
+- [Installation](https://github.com/meokey/smart-fuel-price/wiki/Installation) — HACS (custom repository) or manual install
+- [Configuration](https://github.com/meokey/smart-fuel-price/wiki/Configuration) — config flow, options flow, cache threshold
+- [Providers](https://github.com/meokey/smart-fuel-price/wiki/Providers) — data sources, city coverage, units
+- [Troubleshooting](https://github.com/meokey/smart-fuel-price/wiki/Troubleshooting) — common problems and fixes
+- [FAQ](https://github.com/meokey/smart-fuel-price/wiki/FAQ) — questions from real users
 
 Elsewhere:
 

@@ -23,7 +23,7 @@ Every device gets:
 
 | Entity | Purpose |
 |---|---|
-| Price sensors | The actual numbers — see [[Providers]] for what each one means |
+| Price sensors | The actual numbers — see [Providers](https://github.com/meokey/smart-fuel-price/wiki/Providers) for what each one means |
 | **Last updated** | Timestamp of the last *successful* fetch. The true freshness signal. |
 | **Update status** | `OK` / `Rate limited` / `Failed` for the last attempt |
 | **Manual refresh** (button) | Fetch now, bypassing the cache |

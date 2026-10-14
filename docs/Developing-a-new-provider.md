@@ -79,7 +79,7 @@ user-disableable in the Options flow, also add its key to
 `OPTIONAL_ATTRIBUTES` in `const.py`.
 
 Units: keep everything in **cents per litre** and the `¢/L` label —
-that's the Canadian pump convention (see [[Providers]]).
+that's the Canadian pump convention (see [Providers](https://github.com/meokey/smart-fuel-price/wiki/Providers)).
 
 ## 3. Wire it up (three places)
 
