@@ -1,15 +1,28 @@
-# Smart Fuel Price Wiki
+<p align="center">
+  <img src="https://raw.githubusercontent.com/meokey/smart-fuel-price/main/custom_components/smart_fuel_price/brand/logo.png" alt="Smart Fuel Price — tomorrow's predictions today" width="600" />
+</p>
 
-Welcome! This wiki holds the detailed documentation for the
-[Smart Fuel Price](https://github.com/meokey/smart-fuel-price) Home Assistant
-integration — Canadian fuel price forecasts (Gas Wizard, CityNews) and live
-per-station prices (GasBuddy).
+Know **tomorrow's** fuel price **today** — and whether to fill up now or wait.
+Smart Fuel Price is a Home Assistant custom integration tracking Canadian
+fuel prices across three read-only sources (see
+[Providers](https://github.com/meokey/smart-fuel-price/wiki/Providers)):
 
-- [Installation](https://github.com/meokey/smart-fuel-price/wiki/Installation) — HACS (custom repository) or manual install
-- [Configuration](https://github.com/meokey/smart-fuel-price/wiki/Configuration) — config flow, options flow, cache threshold
-- [Providers](https://github.com/meokey/smart-fuel-price/wiki/Providers) — data sources, city coverage, units
-- [Troubleshooting](https://github.com/meokey/smart-fuel-price/wiki/Troubleshooting) — common problems and fixes
-- [FAQ](https://github.com/meokey/smart-fuel-price/wiki/FAQ) — questions from real users
+- **Gas Wizard** — daily forecast per city: today's price + tomorrow's predicted price
+- **CityNews** — daily price-change forecasts for major cities
+- **GasBuddy** — live per-station prices for any station, per fuel grade
+
+Why it's useful:
+
+- **Buy-now sensor** — a binary sensor that answers the real question directly: fill up today, or wait for tomorrow
+- **Honest status** — *Update status* and *Last updated* sensors always tell the truth about data freshness
+- **Polite by design** — cached polling, one fetch per provider on manual refresh, read-only sources that never get hammered
+
+New here? Start with
+[Installation](https://github.com/meokey/smart-fuel-price/wiki/Installation).
+Building dashboards? See
+[Dashboard cards](https://github.com/meokey/smart-fuel-price/wiki/Dashboard-cards).
+Contributing a source? See
+[Developing a new provider](https://github.com/meokey/smart-fuel-price/wiki/Developing-a-new-provider).
 
 Elsewhere:
 
