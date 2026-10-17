@@ -1,7 +1,7 @@
 # Architecture
 
 How the integration is put together and how data flows through it.
-Diagrams are Mermaid (rendered natively by GitHub) and track the code as of **v2.6.0**.
+Diagrams are Mermaid (rendered natively by GitHub) and track the code as of **v2.6.1**.
 
 - [0. Overview](#0-overview) — modules, who reuses what
 - [1. Fetch pipeline](#1-fetch-pipeline) — the shared core every sensor uses
@@ -156,7 +156,7 @@ flowchart TD
     A --> B["each sensor: async_update()"]
     B --> C["provider.get_data(force=False)<br/>→ shared fetch pipeline (§1)"]
     C --> D["sensor._state = payload[field]<br/>sensor attributes = payload"]
-    D --> E{"fresh payload?<br/>(is_valid, not from_cache)"}
+    D --> E{"fresh payload?<br/>(healthy serving: is_valid<br/>or status ok, not from_cache)"}
     E -->|"yes"| F["persist slot to .storage"]
     E -->|"no"| G["skip persist"]
     subgraph META["meta sensors (no I/O, read provider live)"]
@@ -171,6 +171,13 @@ poll then refreshes normally. GasBuddy station entries additionally run a
 setup-time preview fetch (`get_data()`, not `fetch_data()`) so a brand-new
 device isn't empty while waiting for its first tick — the warmed cache means
 the first scheduled update doesn't fetch twice.
+
+**Persist rule** (v2.6.1+): a slot is written for every *healthy serving* —
+`is_valid` **or** the attempt's status is `ok`. Before v2.6.1 only `is_valid`
+payloads were persisted, so GasWizard morning fetches (`tomorrow_pending`,
+fresh today's price but forecast not yet published) never reached `.storage`;
+after a restart **Last updated** fell back to the last evening persist, days
+stale (#78).
 
 ## 4. Manual refresh
 

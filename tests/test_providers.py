@@ -796,6 +796,27 @@ def test_fresh_cache_slot_only_for_real_fetches():
     assert fresh_cache_slot(provider, {}) is None
 
 
+def test_fresh_cache_slot_persists_tomorrow_pending():
+    """#78: a healthy serving with is_valid=False (GasWizard mornings)
+    must still be persisted, or the on-disk slot -- and "Last updated"
+    after a restart -- goes stale every day until the evening publish."""
+    from sfp_providers.base import fresh_cache_slot
+
+    provider = GasBuddyStationProvider("205748", session=FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION))
+    # Healthy serving: last attempt ok, fresh today's price, but the
+    # forecast isn't published yet (is_valid False).
+    provider._last_fetch_status = "ok"
+    slot = fresh_cache_slot(provider, {"is_valid": False, "current_price": 175.9})
+    assert slot is not None
+    assert slot["data"]["current_price"] == 175.9
+
+    # Same payload shape after a failed attempt: not persisted.
+    provider._last_fetch_status = "error"
+    assert fresh_cache_slot(provider, {"is_valid": False, "current_price": 175.9}) is None
+    provider._last_fetch_status = "rate_limited"
+    assert fresh_cache_slot(provider, {"is_valid": False}) is None
+
+
 def test_last_successful_fetch_tracks_fetches():
     """Drives the per-device "Last updated" timestamp sensor."""
     session = FakeGasBuddySession(GASBUDDY_GRAPHQL_STATION)
