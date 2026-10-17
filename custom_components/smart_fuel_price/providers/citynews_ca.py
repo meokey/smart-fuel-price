@@ -64,9 +64,10 @@ _CITY_LINK_RE = re.compile(
     r'href="https?://([a-z]+)\.citynews\.ca/?"[^>]*>([^<]+)<', re.IGNORECASE
 )
 
-
 class CityNewsCaProvider(BaseFuelPriceProvider):
     """Provider for CityNews Canada (citynews.ca network of city sites)."""
+    _ROBOTS_TXT_URL = "https://citynews.ca/robots.txt"
+    _ROBOTS_CHECK_URL = "https://toronto.citynews.ca/gas-prices/"
 
     BASE_DOMAIN = "citynews.ca"
 

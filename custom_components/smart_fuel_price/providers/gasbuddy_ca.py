@@ -110,7 +110,6 @@ def _extract_csrf_token(home_html: str) -> str | None:
     match = _CSRF_RE.search(home_html or "")
     return match.group(2) if match else None
 
-
 class GasBuddyStationProvider(BaseFuelPriceProvider):
     """Provider for a single GasBuddy station + fuel grade.
 
@@ -118,6 +117,8 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
     there is no per-city list here, so get_supported_cities() and
     discover_cities() are intentionally left at their base defaults.
     """
+    _ROBOTS_TXT_URL = "https://www.gasbuddy.com/robots.txt"
+    _ROBOTS_CHECK_URL = "https://www.gasbuddy.com/graphql"
 
     # Shared across every instance in this process -- see module
     # docstring. {station_id: (fetched_at_epoch, station_dict)}
