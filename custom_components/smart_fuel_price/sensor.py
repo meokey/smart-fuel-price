@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass, SensorDeviceClass
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.const import CONF_NAME
 
@@ -107,6 +108,120 @@ def _hydrate_provider(provider, fetch_cache: dict) -> None:
         _LOGGER.debug("Ignoring corrupt fetch-cache slot %s: %s", provider.cache_key, err)
 
 
+_RETRY_COUNTERS_VERSION = 1
+_RETRY_COUNTERS_KEY = f"{DOMAIN}_retry_counters"
+
+
+async def _load_retry_counters(hass) -> dict:
+    """Load persisted daily retry counters ({cache_key: {date, count}})."""
+    try:
+        async with _cache_lock(hass):
+            return await Store(hass, _RETRY_COUNTERS_VERSION, _RETRY_COUNTERS_KEY).async_load() or {}
+    except Exception as err:  # noqa: BLE001 -- counters are best-effort
+        _LOGGER.debug("Could not load retry counters: %s", err)
+        return {}
+
+
+async def _save_retry_counters(hass, counters: dict) -> None:
+    """Persist daily retry counters, merging so one entry never wipes
+    another's (same load-merge-save pattern as the fetch cache)."""
+    try:
+        async with _cache_lock(hass):
+            store = Store(hass, _RETRY_COUNTERS_VERSION, _RETRY_COUNTERS_KEY)
+            current = await store.async_load() or {}
+            current.update(counters)
+            await store.async_save(current)
+    except Exception as err:  # noqa: BLE001 -- best-effort
+        _LOGGER.warning("Could not persist retry counters: %s", err)
+
+
+def _wire_retry_providers(entities, retry_counters: dict) -> None:
+    """Attach entities to their providers for the retry scheduler (#55).
+
+    Restores each provider's daily retry counter and registers the
+    entities reading from it, so a scheduled retry refreshes them all.
+    Also hooks provider.cancel_retry to entity removal so a pending
+    retry never fires after its entry is unloaded.
+    """
+    seen_providers = set()
+    for entity in entities:
+        providers = getattr(entity, "_providers", None)
+        if providers is None:
+            single = getattr(entity, "_provider", None)
+            providers = [single] if single is not None else []
+        for provider in providers:
+            if entity not in provider._sensors:
+                provider._sensors.append(entity)
+            provider.hydrate_retry_state(retry_counters.get(provider.cache_key))
+            if id(provider) not in seen_providers:
+                seen_providers.add(id(provider))
+                entity.async_on_remove(provider.cancel_retry)
+
+
+async def _update_retry_schedule(sensor) -> None:
+    """Schedule or cancel the provider's automatic retry after a fetch.
+
+    The single convergence point: polls, manual refreshes and retries all
+    flow through _async_fetch, so retry bookkeeping lives here exactly
+    once. One retry per provider -- the handle is shared across all of
+    the provider's sensors.
+    """
+    provider = sensor._provider
+    hass = sensor.hass
+    if provider.last_fetch_status not in ("error", "rate_limited"):
+        provider.cancel_retry()
+        return
+    # Fast path: skip the executor hop when a sibling already scheduled.
+    # (The check after the await below is the real guard -- check+set is
+    # atomic there, so concurrent _async_fetch calls can't double-book.)
+    if provider._retry_handle is not None:
+        return
+    # next_retry_delay() may fetch robots.txt on a cache miss -- never
+    # block the event loop for it.
+    delay = await hass.async_add_executor_job(provider.next_retry_delay)
+    if delay is None or provider._retry_handle is not None:
+        return
+    if delay is None or provider._retry_handle is not None:
+        return
+    _LOGGER.info(
+        "[%s] Fetch failed for '%s' (%s); scheduling automatic retry in %s",
+        provider.name, provider.city, provider.last_fetch_status, delay,
+    )
+
+    async def _do_retry(_now):
+        provider._retry_handle = None
+        # Re-check the cap in the executor (the day may have rolled over
+        # while we waited, or another entry persisted a newer counter).
+        should = await hass.async_add_executor_job(
+            lambda: provider.next_retry_delay() is not None
+        )
+        if not should:
+            _LOGGER.info(
+                "[%s] Skipping scheduled retry for '%s': daily cap reached",
+                provider.name, provider.city,
+            )
+            return
+        state = await hass.async_add_executor_job(provider.record_retry)
+        await _save_retry_counters(hass, {provider.cache_key: state})
+        _LOGGER.info(
+            "[%s] Automatic retry for '%s' (%d used today)",
+            provider.name, provider.city, state["count"],
+        )
+        await hass.async_add_executor_job(provider.get_data, True)
+        for entity in list(provider._sensors):
+            try:
+                await entity.async_update()
+            except Exception as err:  # noqa: BLE001 -- one bad entity
+                _LOGGER.debug("Retry refresh of %s failed: %s", entity, err)
+        # If the retry failed, the entities' _async_fetch calls above
+        # scheduled the next backoff rung; if it succeeded, they
+        # cancelled the (already fired) handle -- nothing left to do.
+
+    provider._retry_handle = async_call_later(
+        hass, delay.total_seconds(), _do_retry
+    )
+
+
 def _ttl_for_entry(data, options, provider_type: str) -> timedelta:
     minutes = options.get(
         CONF_CACHE_TTL_MINUTES,
@@ -136,6 +251,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     # hydrated from .storage so sensors have data right after a restart.
     fetch_cache = await _load_fetch_cache(hass)
     hass.data[DOMAIN].setdefault("fetch_cache", {})[config_entry.entry_id] = fetch_cache
+
+    # Daily automatic-retry counters (#55), likewise persisted.
+    retry_counters = await _load_retry_counters(hass)
 
     # {device_key: {"name": ..., "sensors": [...]}} -- consumed by button.py
     # to build one manual-refresh button per device.
@@ -214,6 +332,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             by_device[device_key]["update_status"] = update_status
             by_device[device_key]["model"] = device_model
             by_device[device_key]["configuration_url"] = device_source_url
+        _wire_retry_providers(entities, retry_counters)
         async_add_entities(entities, True)
         hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
         return
@@ -285,6 +404,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     by_device[config_entry.entry_id]["update_status"] = update_status
     by_device[config_entry.entry_id]["model"] = device_model
     by_device[config_entry.entry_id]["configuration_url"] = device_source_url
+    _wire_retry_providers(sensors, retry_counters)
     async_add_entities(sensors, True)
     hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
 
@@ -495,3 +615,8 @@ class SmartFuelSensor(SensorEntity):
         except Exception as err:
             _LOGGER.error("Error fetching data from %s: %s", self._provider.name, err)
             self._attributes["is_valid"] = False
+
+        # Retry bookkeeping converges here: polls, manual refreshes and
+        # retries all flow through _async_fetch, so schedule/cancel lives
+        # in exactly one place.
+        await _update_retry_schedule(self)

@@ -28,6 +28,17 @@ helpers = types.ModuleType("homeassistant.helpers"); helpers.__path__ = []
 devreg = types.ModuleType("homeassistant.helpers.device_registry")
 devreg.DeviceInfo = lambda **kwargs: kwargs
 helpers.device_registry = devreg
+event_mod = types.ModuleType("homeassistant.helpers.event")
+scheduled_calls = []
+
+
+def fake_call_later(hass, delay, callback):
+    scheduled_calls.append((delay, callback))
+    return lambda: None
+
+
+event_mod.async_call_later = fake_call_later
+helpers.event = event_mod
 ha.helpers = helpers
 sys.modules.update(
     {
@@ -36,6 +47,7 @@ sys.modules.update(
         "homeassistant.components.button": button_mod,
         "homeassistant.helpers": helpers,
         "homeassistant.helpers.device_registry": devreg,
+        "homeassistant.helpers.event": event_mod,
     }
 )
 
@@ -71,11 +83,20 @@ class FakeSensor:
         self.update_calls += 1
 
 
+def _pressable_button(*sensors):
+    """Button with the HA bits async_press needs (hass, state write)."""
+    btn = button.SmartFuelRefreshButton("k", "Device", list(sensors))
+    btn.hass = object()
+    btn.writes = 0
+    btn.async_write_ha_state = lambda: setattr(btn, "writes", btn.writes + 1)
+    return btn
+
+
 def test_press_fetches_once_per_unique_provider():
     provider_a, provider_b = object(), object()
     s1, s2 = FakeSensor(provider_a), FakeSensor(provider_a)
     s3 = FakeSensor(provider_b)
-    btn = button.SmartFuelRefreshButton("k", "Device", [s1, s2, s3])
+    btn = _pressable_button(s1, s2, s3)
     asyncio.run(btn.async_press())
     # One forced fetch per provider, not per sensor...
     assert (s1.force_calls, s2.force_calls, s3.force_calls) == (1, 0, 1)
@@ -84,5 +105,40 @@ def test_press_fetches_once_per_unique_provider():
 
 
 def test_press_with_no_sensors_does_not_raise():
-    btn = button.SmartFuelRefreshButton("k", "Device", [])
+    btn = _pressable_button()
     asyncio.run(btn.async_press())
+
+
+def test_available_before_press():
+    btn = _pressable_button()
+    assert btn.available is True
+    assert btn.extra_state_attributes["next_available_at"] is None
+
+
+def test_press_starts_cooldown():
+    s1 = FakeSensor(object())
+    btn = _pressable_button(s1)
+    asyncio.run(btn.async_press())
+    assert s1.force_calls == 1
+    assert btn.available is False
+    assert btn.extra_state_attributes["next_available_at"] is not None
+    # A second press during the cooldown is ignored, not queued.
+    asyncio.run(btn.async_press())
+    assert s1.force_calls == 1
+
+
+def test_cooldown_reenables_button():
+    scheduled_calls.clear()
+    s1 = FakeSensor(object())
+    btn = _pressable_button(s1)
+    asyncio.run(btn.async_press())
+    assert btn.available is False
+    assert len(scheduled_calls) == 1
+    delay, callback = scheduled_calls[0]
+    assert delay == 60
+    asyncio.run(callback(None))  # cooldown timer fires
+    assert btn.available is True
+    assert btn.extra_state_attributes["next_available_at"] is None
+    # Pressing again works after the cooldown.
+    asyncio.run(btn.async_press())
+    assert s1.force_calls == 2

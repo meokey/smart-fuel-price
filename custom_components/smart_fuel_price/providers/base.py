@@ -10,14 +10,19 @@ import time
 from datetime import datetime, timedelta, timezone
 from abc import ABC, abstractmethod
 from typing import Any
+from urllib.robotparser import RobotFileParser
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
 _LOGGER = logging.getLogger(__name__)
 
 # Politeness delay between city-list probe requests (seconds). Probes run
 # rarely (1-week cache) and only for not-yet-verified cities, but when
-# they do, don't hammer the source.
+# they do, don't hammer the source. This is a floor -- the effective gap
+# is max(_PROBE_DELAY_SECONDS, min_request_interval()), so a robots.txt
+# Crawl-delay above 1s is honored (see filter_cities_with_prices).
 _PROBE_DELAY_SECONDS = 1.0
 
 # How long after a failed fetch (with nothing cached) an automatic
@@ -26,6 +31,23 @@ _PROBE_DELAY_SECONDS = 1.0
 # source. Forced (manual) refreshes bypass this; the next scheduled
 # poll (15 min default) is far outside the window.
 _RETRY_COOLDOWN_SECONDS = 60
+
+# Automatic retry backoff after a failed fetch (#55): 15 -> 30 -> 60 ->
+# 60 minutes. Retries are scheduled per provider (not per sensor) via
+# async_call_later in sensor.py; each retry is a forced fetch.
+_RETRY_BACKOFF_MINUTES = (15, 30, 60, 60)
+
+# Absolute ceiling on automatic retries: per provider+city per UTC day.
+# Retries never hammer -- even a permanently dead source costs at most
+# 5 extra requests a day.
+_MAX_RETRIES_PER_DAY = 5
+
+# robots.txt cache TTL. The file barely changes; refetch at most daily.
+_ROBOTS_CACHE_TTL = timedelta(hours=24)
+
+# Floor for min_request_interval() when robots.txt has no Crawl-delay
+# (or can't be fetched -- fail-open).
+_DEFAULT_MIN_INTERVAL_SECONDS = 1.0
 
 
 class RateLimitedError(Exception):
@@ -173,13 +195,171 @@ class BaseFuelPriceProvider(ABC):
         # coordinator updates on executor threads, so without the lock two
         # threads could pass the TTL check together and fetch twice.
         self._cache_lock = threading.Lock()
+        # Automatic-retry state (#55). _consec_failures drives the backoff
+        # ladder; _retry_state ({"date": "YYYY-MM-DD", "count": n}) enforces
+        # the daily cap and is persisted across restarts (see sensor.py).
+        # _retry_handle is an opaque async cancel handle owned by the
+        # scheduler in sensor.py; _sensors lists the entities reading from
+        # this provider so a retry can refresh them all at once.
+        self._consec_failures = 0
+        self._retry_state: dict[str, Any] = {"date": None, "count": 0}
+        self._retry_handle: Any = None
+        self._sensors: list[Any] = []
 
     @classmethod
     def _build_session(cls) -> requests.Session:
-        """Return a requests.Session pre-configured with browser-like headers."""
+        """Return a requests.Session pre-configured with browser-like headers.
+
+        Transport-level retry (seconds-scale) is mounted here so every
+        provider gets it: transient 429/5xx responses are retried in place,
+        honoring the server's own ``Retry-After`` header. This complements
+        -- not replaces -- the application-level retry backoff (#55),
+        which handles persistent failures on a minutes scale.
+        """
         session = requests.Session()
         session.headers.update(DEFAULT_HEADERS)
+        retry = Retry(
+            total=2,
+            status_forcelist=(429, 500, 502, 503, 504),
+            respect_retry_after_header=True,
+            backoff_factor=1,
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
         return session
+
+    # ------------------------------------------------------------------
+    # robots.txt: one global politeness rule for all providers (#55).
+    # ------------------------------------------------------------------
+    # Where this provider's robots.txt lives; subclasses must set it.
+    _ROBOTS_TXT_URL: str | None = None
+    # A representative fetch URL, used for the Disallow canary check.
+    _ROBOTS_CHECK_URL: str | None = None
+
+    # Class-level cache: {robots_url: (fetched_at, RobotFileParser | None)}.
+    # None (fail-open) is cached too -- a dead robots.txt must not cost a
+    # network round-trip on every call.
+    _robots_cache: dict[str, tuple[datetime, RobotFileParser | None]] = {}
+    _robots_lock = threading.Lock()
+
+    @classmethod
+    def _get_robots(cls) -> RobotFileParser | None:
+        """Fetch + parse robots.txt, cached for 24h. None means fail-open.
+
+        May do network I/O on a cache miss -- callers in async context
+        must run it in an executor (see next_retry_delay usage).
+        """
+        url = cls._ROBOTS_TXT_URL
+        if not url:
+            return None
+        now = datetime.now(timezone.utc)
+        with cls._robots_lock:
+            cached = cls._robots_cache.get(url)
+            if cached and now - cached[0] < _ROBOTS_CACHE_TTL:
+                return cached[1]
+        rp: RobotFileParser | None = None
+        try:
+            resp = requests.get(url, timeout=10, headers=DEFAULT_HEADERS)
+            resp.raise_for_status()
+            rp = RobotFileParser()
+            rp.parse(resp.text.splitlines())
+            check = cls._ROBOTS_CHECK_URL
+            if check and not rp.can_fetch("*", check):
+                # Canary, not enforcement: a broad Disallow must not
+                # silently kill the integration -- but it must be visible.
+                _LOGGER.warning(
+                    "[%s] robots.txt disallows %s -- continuing anyway "
+                    "(fail-open); tell the maintainer if the source "
+                    "complains.",
+                    cls.__name__, check,
+                )
+        except Exception as err:  # noqa: BLE001 -- robots.txt is best-effort
+            _LOGGER.debug(
+                "[%s] Could not fetch robots.txt (%s); assuming allowed",
+                cls.__name__, err,
+            )
+        with cls._robots_lock:
+            cls._robots_cache[url] = (now, rp)
+        return rp
+
+    @classmethod
+    def min_request_interval(cls) -> float:
+        """Global politeness rule: minimum seconds between requests.
+
+        max(robots.txt Crawl-delay, 1s default). Every request path --
+        city probes, automatic retries, manual refreshes -- consults this,
+        so anti-abuse behavior lives in one place instead of scattered
+        constants.
+        """
+        rp = cls._get_robots()
+        if rp is not None:
+            delay = rp.crawl_delay("*")
+            if delay is not None:
+                return max(float(delay), _DEFAULT_MIN_INTERVAL_SECONDS)
+        return _DEFAULT_MIN_INTERVAL_SECONDS
+
+    # ------------------------------------------------------------------
+    # Automatic retry state machine (#55).
+    # ------------------------------------------------------------------
+    def next_retry_delay(self) -> timedelta | None:
+        """Delay before the next automatic retry; None = don't retry.
+
+        Retries only happen after a failed attempt (``error`` or
+        ``rate_limited``), follow the backoff ladder
+        :data:`_RETRY_BACKOFF_MINUTES`, never exceed
+        :data:`_MAX_RETRIES_PER_DAY` per UTC day, and never go below
+        :meth:`min_request_interval` (the robots.txt rule).
+
+        May do network I/O on a robots.txt cache miss -- callers in async
+        context must run it in an executor.
+        """
+        if self._last_fetch_status not in ("error", "rate_limited"):
+            return None
+        today = datetime.now(timezone.utc).date().isoformat()
+        count = (
+            self._retry_state["count"]
+            if self._retry_state.get("date") == today
+            else 0
+        )
+        if count >= _MAX_RETRIES_PER_DAY:
+            return None
+        failures = max(self._consec_failures, 1)
+        backoff_minutes = _RETRY_BACKOFF_MINUTES[
+            min(failures - 1, len(_RETRY_BACKOFF_MINUTES) - 1)
+        ]
+        seconds = max(backoff_minutes * 60, self.min_request_interval())
+        return timedelta(seconds=seconds)
+
+    def record_retry(self) -> dict[str, Any]:
+        """Increment today's retry counter. Returns the state for persisting."""
+        today = datetime.now(timezone.utc).date().isoformat()
+        if self._retry_state.get("date") != today:
+            self._retry_state = {"date": today, "count": 0}
+        self._retry_state["count"] += 1
+        return dict(self._retry_state)
+
+    def hydrate_retry_state(self, state: dict[str, Any] | None) -> None:
+        """Restore the daily retry counter from the persisted store."""
+        if (
+            isinstance(state, dict)
+            and isinstance(state.get("count"), int)
+            and state["count"] >= 0
+        ):
+            self._retry_state = {
+                "date": state.get("date"),
+                "count": state["count"],
+            }
+
+    def cancel_retry(self) -> None:
+        """Cancel a scheduled automatic retry, if any (idempotent)."""
+        handle, self._retry_handle = self._retry_handle, None
+        if handle is not None:
+            try:
+                handle()
+            except Exception:  # noqa: BLE001 -- best-effort cancel
+                pass
 
     @property
     def city(self) -> str:
@@ -406,6 +586,7 @@ class BaseFuelPriceProvider(ABC):
             self._cached_data = dict(data)
             self._cached_at = now
             self._last_fetch_status = "ok"
+            self._consec_failures = 0
             data["from_cache"] = False
             return data
 
@@ -420,10 +601,12 @@ class BaseFuelPriceProvider(ABC):
             self._cached_data = dict(data)
             self._cached_at = now
             self._last_fetch_status = "ok"
+            self._consec_failures = 0
             data["from_cache"] = False
             return data
 
         self._last_fetch_status = "rate_limited" if rate_limited else "error"
+        self._consec_failures += 1
 
         if self.allow_stale_on_failure and self._cached_data is not None:
             # Warning (not info): a failing source is the reason "Last
@@ -524,9 +707,12 @@ def filter_cities_with_prices(provider_cls, cities: list[str]) -> list[str]:
         return list(cities)
     probed_ok: set[str] = set()
     session = provider_cls._build_session()
+    # The global politeness rule (#55): never probe faster than the
+    # robots.txt Crawl-delay (or the 1s floor).
+    probe_gap = max(_PROBE_DELAY_SECONDS, provider_cls.min_request_interval())
     for i, city in enumerate(to_probe):
         if i:
-            time.sleep(_PROBE_DELAY_SECONDS)
+            time.sleep(probe_gap)
         try:
             has = provider_cls.city_has_prices(city, session=session)
         except Exception:  # noqa: BLE001 -- fail-open, see above

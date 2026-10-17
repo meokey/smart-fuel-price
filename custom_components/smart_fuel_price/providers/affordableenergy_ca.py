@@ -132,9 +132,10 @@ def _tomorrow_in_site_tz() -> "datetime.date":
 def _today_in_site_tz() -> "datetime.date":
     return datetime.now(_SITE_TZ).date()
 
-
 class AffordableEnergyCaProvider(BaseFuelPriceProvider):
     """Provider for Gas Wizard (gaswizard.ca)."""
+    _ROBOTS_TXT_URL = "https://gaswizard.ca/robots.txt"
+    _ROBOTS_CHECK_URL = "https://gaswizard.ca/gas-prices/toronto/"
 
     @property
     def name(self) -> str:

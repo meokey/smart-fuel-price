@@ -1,7 +1,7 @@
 # Architecture
 
 How the integration is put together and how data flows through it.
-Diagrams are Mermaid (rendered natively by GitHub) and track the code as of **v2.5.6**.
+Diagrams are Mermaid (rendered natively by GitHub) and track the code as of **v2.6.0**.
 
 - [0. Overview](#0-overview) — modules, who reuses what
 - [1. Fetch pipeline](#1-fetch-pipeline) — the shared core every sensor uses
@@ -59,7 +59,7 @@ flowchart TD
     B -->|"yes"| C["return cached payload<br/>from_cache=True<br/>status: keep error/rate_limited,<br/>otherwise ok"]
     B -->|"no"| D{"failed under 60s ago,<br/>nothing cached,<br/>not forced?"}
     D -->|"yes"| E["return blank result<br/>(no network call)"]
-    D -->|"no"| F["fetch_data()<br/>→ provider._parse_data()"]
+    D -->|"no"| F["fetch_data()<br/>→ provider._parse_data()<br/>(session retries transient 429/5xx<br/>in place, honoring Retry-After)"]
     F --> G{"exception?"}
     G -->|"RateLimitedError"| H["flag rate_limited"]
     G -->|"RequestException / parse error"| I["blank result"]
@@ -73,6 +73,7 @@ flowchart TD
     N --> O{"allow_stale_on_failure<br/>and cache warm?"}
     O -->|"yes"| P["serve stale payload<br/>stale=True"]
     O -->|"no"| Q["return invalid payload<br/>(sensors → Unknown)"]
+    N --> R["schedule automatic retry<br/>(sensor.py, one per provider)<br/>backoff 15→30→60→60 min<br/>max 5/day, ≥ robots Crawl-delay"]
 ```
 
 Key semantics:
@@ -86,6 +87,19 @@ Key semantics:
 - **60s retry cooldown** (v2.5.4+): an automatic retry seconds after a failure
   (nothing cached) would just fail again — it returns blank without a network
   call. Forced refreshes bypass it.
+- **Transport-level retry** (v2.6.0+): the shared session mounts a urllib3
+  `Retry` — transient 429/5xx responses are retried in place (up to 2
+  attempts), honoring the server's `Retry-After` header. Seconds-scale;
+  complements the application backoff below. 403 is *not* retried at this
+  layer (it isn't transient).
+- **Application-level retry** (v2.6.0+, #55): after a failed attempt
+  (`error`/`rate_limited`), `sensor.py` schedules one retry per provider via
+  `async_call_later` — backoff 15 → 30 → 60 → 60 minutes, max 5 per provider
+  per day (counter persisted across restarts), never below the robots.txt
+  `Crawl-delay`. One retry is shared across all of the provider's sensors;
+  success resets the ladder; entry unload cancels the pending timer. The
+  manual-refresh button cools down for 60 s after each press
+  (`available=False`, `next_available_at` attribute).
 - **Stale fallback** is opt-in per provider (`allow_stale_on_failure`, e.g.
   CityNews Calgary). GasWizard does not serve stale data: a genuine failure
   with no cache yields Unknown.
@@ -177,3 +191,6 @@ Before v2.5.3 the button fanned out into one forced fetch *per sensor* — on a
 slow source that meant N sequential timeouts. A genuinely failed refresh still
 reports `Failed` (and sensors read Unknown when there is nothing cached);
 v2.5.2+ no longer confuses "forecast not published yet" with failure.
+v2.6.0+ adds a 60 s post-press cooldown: the button reports
+`available=False` (greyed out in the UI) with a `next_available_at`
+attribute, so a struggling source can't be hammered by repeated taps.
