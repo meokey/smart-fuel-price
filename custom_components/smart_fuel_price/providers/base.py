@@ -78,15 +78,23 @@ def summarize_fetch_status(statuses: list[str | None]) -> str | None:
 
 
 def fresh_cache_slot(provider: "BaseFuelPriceProvider", data: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Build the persisted-cache slot for a fresh, valid fetch.
+    """Build the persisted-cache slot for a fresh, healthy fetch.
 
     Returns ``{"data": ..., "fetched_at": ...}`` when *data* came from a
-    real network fetch (not the TTL cache) and is valid, else None.
+    real network fetch (not the TTL cache) and the fetch was a healthy
+    serving, else None. "Healthy" means ``is_valid`` *or* the provider's
+    last fetch status is ``"ok"``: a GasWizard morning fetch with
+    ``tomorrow_pending`` carries fresh data (today's price) even though
+    ``is_valid`` is False, and must be persisted too -- otherwise the
+    on-disk slot (and "Last updated" after a restart) goes stale every
+    day until the evening publish (#78).
     Shared by the setup-time preview persist and the sensor update path so
     the "what counts as a persistable fetch" rule lives in one place --
     and so the "Last updated" timestamp survives restarts faithfully.
     """
-    if data and not data.get("from_cache") and data.get("is_valid"):
+    if not data or data.get("from_cache"):
+        return None
+    if data.get("is_valid") or provider.last_fetch_status == "ok":
         return {
             "data": data,
             "fetched_at": datetime.now(timezone.utc).timestamp(),
