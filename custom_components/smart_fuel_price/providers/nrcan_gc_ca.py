@@ -259,14 +259,29 @@ class NrcanGcCaProvider(BaseFuelPriceProvider):
                 self.name,
             )
             return
+        try:
+            # StatisticMeanType exists on HA versions new enough to
+            # require mean_type/unit_class (2026.11 enforces them).
+            from homeassistant.components.recorder.models import (
+                StatisticMeanType,
+            )
+        except ImportError:
+            mean_type = None
+        else:
+            mean_type = StatisticMeanType.ARITHMETIC
         metadata = {
             "source": "smart_fuel_price",
             "statistic_id": f"smart_fuel_price:nrc_weekly_{self.city}",
             "name": f"NRC weekly average ({self.city})",
             "unit_of_measurement": "¢/L",
-            "has_mean": True,
+            "has_mean": True,  # legacy; required on HA versions without mean_type
             "has_sum": False,
         }
+        if mean_type is not None:
+            # HA >= 2026.11: report_usage (then hard failure) if absent.
+            # No unit converter exists for ¢/L, so unit_class is None.
+            metadata["mean_type"] = mean_type
+            metadata["unit_class"] = None
         statistics = []
         for week_ending, price in series:
             year, month, day = (
