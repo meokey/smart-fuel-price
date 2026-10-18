@@ -128,6 +128,31 @@ paying above the official average. The NRC line only moves weekly, so
 two weeks (`hours_to_show: 336`) shows about two steps — enough context
 without noise.
 
+### Year-long NRC view (backfilled)
+
+The NRC device backfills its full weekly history (~1 year) into HA's
+long-term statistics on first fetch, as the external statistic
+`smart_fuel_price:nrc_weekly_<city>` (e.g.
+`smart_fuel_price:nrc_weekly_toronto`). A `statistics-graph` card shows
+the whole year — and overlays the forecast's own recorded history for
+the overlapping period:
+
+```yaml
+type: statistics-graph
+entities:
+  - smart_fuel_price:nrc_weekly_toronto
+  - sensor.smart_fuel_price_toronto_today_s_price
+stat_types:
+  - mean
+days_to_show: 365
+```
+
+(Your sensors' own long-term statistics are recorded automatically by
+HA — `state_class: measurement` — so every price and forecast the
+integration fetches accumulates history from the day you install it.
+The NRC backfill is the special case: it injects the year *before* you
+installed, which the recorder could never have seen.)
+
 ---
 
 ## Blueprint: evening rise alert

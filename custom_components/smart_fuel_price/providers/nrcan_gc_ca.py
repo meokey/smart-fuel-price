@@ -216,6 +216,90 @@ class NrcanGcCaProvider(BaseFuelPriceProvider):
         "&locationID=17&frequency=W"
     )
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Full parsed weekly series, oldest first: (week_ending, price).
+        # Populated by _parse_data; kept off the payload dict so it never
+        # becomes an entity attribute.
+        self._history_series: list[tuple[str, float]] = []
+
+    @property
+    def history_series(self) -> list[tuple[str, float]]:
+        """Completed weeks parsed by the last successful fetch.
+
+        Empty until the first successful fetch. Used for the long-term
+        statistics backfill (#81).
+        """
+        return list(self._history_series)
+
+    async def async_import_history(self, hass: Any) -> None:
+        """Backfill the weekly series into HA long-term statistics.
+
+        Uses the recorder's public external-statistics API; the import is
+        an idempotent upsert on (statistic_id, start), so re-running after
+        every fetch is safe and self-healing (e.g. after a recorder wipe).
+        Fail-safe by design: a missing recorder or API on some HA version
+        only logs -- the sensor itself keeps working.
+
+        The import is lazy on purpose: provider modules must stay
+        importable with only stdlib + requests (see tests/conftest.py and
+        scripts/gen_docs.py).
+        """
+        series = self._history_series
+        if not series:
+            return
+        try:
+            from homeassistant.components.recorder.statistics import (
+                async_add_external_statistics,
+            )
+        except ImportError:
+            _LOGGER.debug(
+                "[%s] Recorder statistics API unavailable; "
+                "skipping history import.",
+                self.name,
+            )
+            return
+        metadata = {
+            "source": "smart_fuel_price",
+            "statistic_id": f"smart_fuel_price:nrc_weekly_{self.city}",
+            "name": f"NRC weekly average ({self.city})",
+            "unit_of_measurement": "¢/L",
+            "has_mean": True,
+            "has_sum": False,
+        }
+        statistics = []
+        for week_ending, price in series:
+            year, month, day = (
+                int(week_ending[0:4]),
+                int(week_ending[5:7]),
+                int(week_ending[8:10]),
+            )
+            statistics.append(
+                {
+                    "start": datetime(year, month, day, tzinfo=_TORONTO_TZ),
+                    "mean": price,
+                    "min": price,
+                    "max": price,
+                    "state": price,
+                }
+            )
+        try:
+            async_add_external_statistics(hass, metadata, statistics)
+        except Exception:  # noqa: BLE001 -- never break the sensor on stats
+            _LOGGER.warning(
+                "[%s] Could not import NRC history for '%s'.",
+                self.name,
+                self.city,
+                exc_info=True,
+            )
+        else:
+            _LOGGER.debug(
+                "[%s] Imported %d weeks of history for '%s'.",
+                self.name,
+                len(statistics),
+                self.city,
+            )
+
     @property
     def name(self) -> str:
         return "Natural Resources Canada"
@@ -325,8 +409,10 @@ class NrcanGcCaProvider(BaseFuelPriceProvider):
 
         today = datetime.now(_TORONTO_TZ).date()
         year = today.year
-        # Latest completed week first; around New Year it may live on
-        # last year's page.
+        # Both this year and last: the sensor value needs only the latest
+        # completed week, but the history backfill (#81) wants a full year.
+        # Two plain GETs per poll is far under any politeness concern.
+        all_completed: list[tuple[str, float, dict[str, float]]] = []
         for table_year in (year, year - 1):
             try:
                 response = self._get(
@@ -343,34 +429,44 @@ class NrcanGcCaProvider(BaseFuelPriceProvider):
                 continue
             rows = _parse_weekly_rows(response.text)
             # Never present a partial (future-dated) week as the reference.
-            completed = [r for r in rows if r[0] < today.isoformat()]
-            if not completed:
-                continue
-            week_ending, price, components = completed[-1]
-            _LOGGER.debug(
-                "[%s] %s: weekly average %.1f ¢/L (week ending %s)",
+            all_completed.extend(
+                r for r in rows if r[0] < today.isoformat()
+            )
+        if not all_completed:
+            _LOGGER.warning(
+                "[%s] No completed weekly row found for '%s'.",
                 self.name,
                 self.city,
-                price,
-                week_ending,
             )
-            return {
-                "city": self.city,
-                "current_price": round(price, 1),
-                "week_ending": week_ending,
-                "price_taxes": components.get("taxes"),
-                "price_marketing_margin": components.get(
-                    "marketing_margin"
-                ),
-                "price_refining_margin": components.get(
-                    "refining_margin"
-                ),
-                "is_valid": True,
-            }
-
-        _LOGGER.warning(
-            "[%s] No completed weekly row found for '%s'.",
+            return {"city": self.city, "is_valid": False}
+        # Deduplicate across the two pages (they shouldn't overlap) and
+        # sort oldest first.
+        seen: dict[str, tuple[float, dict[str, float]]] = {}
+        for week_ending, price, components in all_completed:
+            seen.setdefault(week_ending, (price, components))
+        ordered = sorted(seen.items(), key=lambda kv: kv[0])
+        self._history_series = [
+            (week_ending, price) for week_ending, (price, _) in ordered
+        ]
+        week_ending, (price, components) = ordered[-1]
+        _LOGGER.debug(
+            "[%s] %s: weekly average %.1f ¢/L (week ending %s, %d weeks of history)",
             self.name,
             self.city,
+            price,
+            week_ending,
+            len(ordered),
         )
-        return {"city": self.city, "is_valid": False}
+        return {
+            "city": self.city,
+            "current_price": round(price, 1),
+            "week_ending": week_ending,
+            "price_taxes": components.get("taxes"),
+            "price_marketing_margin": components.get(
+                "marketing_margin"
+            ),
+            "price_refining_margin": components.get(
+                "refining_margin"
+            ),
+            "is_valid": True,
+        }
