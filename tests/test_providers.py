@@ -1418,3 +1418,129 @@ def test_nrcan_parses_nested_markup():
     data = _nrcan_toronto_provider(session).fetch_data()
     assert data["is_valid"] is True
     assert data["current_price"] == 180.2
+
+
+def _stub_recorder(monkeypatch):
+    """Stub homeassistant.components.recorder.statistics in sys.modules."""
+    import sys
+    import types
+
+    calls = []
+
+    def fake_add(hass, metadata, statistics):
+        calls.append((metadata, list(statistics)))
+
+    stats_mod = types.ModuleType(
+        "homeassistant.components.recorder.statistics"
+    )
+    stats_mod.async_add_external_statistics = fake_add
+    for name in (
+        "homeassistant",
+        "homeassistant.components",
+        "homeassistant.components.recorder",
+        "homeassistant.components.recorder.statistics",
+    ):
+        mod = types.ModuleType(name)
+        monkeypatch.setitem(sys.modules, name, mod)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.recorder.statistics",
+        stats_mod,
+    )
+    return calls
+
+
+def test_nrcan_parse_data_tracks_full_history():
+    """history_series holds every completed week across both year pages."""
+    from datetime import date
+    today = date.today()
+    cur_html = _nrcan_html([
+        (today - timedelta(days=14), 184.6, 30.2, 13.3, 59.3),
+        (today - timedelta(days=7), 180.2, 29.7, 13.8, 50.3),
+        (today + timedelta(days=3), 175.0, 29.0, 12.0, 48.0),
+    ])
+    prev_html = _nrcan_html([
+        (today - timedelta(days=370), 150.0, 28.0, 10.0, 40.0),
+    ])
+    session = FakeSession({
+        _nrcan_url(today.year): cur_html,
+        _nrcan_url(today.year - 1): prev_html,
+    })
+    provider = _nrcan_toronto_provider(session)
+    data = provider.fetch_data()
+    assert data["is_valid"] is True
+    # Latest completed week still drives the sensor value...
+    assert data["current_price"] == 180.2
+    # ...while the full series (oldest first, partial week excluded)
+    # is available for the statistics backfill.
+    history = provider.history_series
+    assert len(history) == 3
+    assert history[0][0] == (today - timedelta(days=370)).isoformat()
+    assert history[0][1] == 150.0
+    assert history[-1][0] == (today - timedelta(days=7)).isoformat()
+    assert all(d < today.isoformat() for d, _ in history)
+
+
+def test_nrcan_import_history_writes_external_statistics(monkeypatch):
+    """Backfill calls the recorder API with one point per week."""
+    import asyncio
+    from datetime import date
+    calls = _stub_recorder(monkeypatch)
+    today = date.today()
+    html = _nrcan_html([
+        (today - timedelta(days=14), 184.6, 30.2, 13.3, 59.3),
+        (today - timedelta(days=7), 180.2, 29.7, 13.8, 50.3),
+    ])
+    session = FakeSession({_nrcan_url(today.year): html})
+    provider = _nrcan_toronto_provider(session)
+    assert provider.fetch_data()["is_valid"] is True
+    asyncio.run(provider.async_import_history(object()))
+    assert len(calls) == 1
+    metadata, statistics = calls[0]
+    assert metadata["source"] == "smart_fuel_price"
+    assert metadata["statistic_id"] == "smart_fuel_price:nrc_weekly_toronto"
+    assert metadata["unit_of_measurement"] == "¢/L"
+    assert metadata["has_mean"] is True
+    assert metadata["has_sum"] is False
+    # Current-year page (2 rows) + previous-year page (404 -> skipped).
+    assert len(statistics) == 2
+    first = statistics[0]
+    assert first["mean"] == first["min"] == first["max"] == 184.6
+    assert first["start"].isoformat().startswith(
+        (today - timedelta(days=14)).isoformat()
+    )
+    assert first["start"].tzinfo is not None
+
+
+def test_nrcan_import_history_noop_without_series(monkeypatch):
+    """No fetch yet -> no recorder call, no crash."""
+    import asyncio
+    calls = _stub_recorder(monkeypatch)
+    from sfp_providers.nrcan_gc_ca import NrcanGcCaProvider
+    provider = NrcanGcCaProvider("toronto", session=FakeSession({}))
+    asyncio.run(provider.async_import_history(object()))
+    assert calls == []
+
+
+def test_nrcan_import_history_survives_missing_recorder(monkeypatch):
+    """ImportError from the lazy import is swallowed (fail-safe)."""
+    import asyncio
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name.startswith("homeassistant"):
+            raise ImportError("no HA here")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    from datetime import date
+    today = date.today()
+    html = _nrcan_html([
+        (today - timedelta(days=7), 180.2, 29.7, 13.8, 50.3),
+    ])
+    session = FakeSession({_nrcan_url(today.year): html})
+    provider = _nrcan_toronto_provider(session)
+    assert provider.fetch_data()["is_valid"] is True
+    # Must not raise.
+    asyncio.run(provider.async_import_history(object()))

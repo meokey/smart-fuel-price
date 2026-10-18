@@ -617,6 +617,13 @@ class SmartFuelSensor(SensorEntity):
                 if slot is not None:
                     self._fetch_cache[self._provider.cache_key] = slot
                     await _save_fetch_cache(self.hass, self._fetch_cache)
+                # NRC history backfill (#81): the provider's full weekly
+                # series becomes long-term statistics (idempotent; the
+                # provider no-ops when there is nothing to import).
+                if isinstance(self._provider, NrcanGcCaProvider) and data.get(
+                    "is_valid"
+                ):
+                    await self._provider.async_import_history(self.hass)
             else:
                 _LOGGER.warning("Received empty data payload from provider: %s", self._provider.name)
 

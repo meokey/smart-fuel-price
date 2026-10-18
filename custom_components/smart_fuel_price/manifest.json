@@ -1,6 +1,9 @@
 {
   "domain": "smart_fuel_price",
   "name": "Smart Fuel Price",
+  "after_dependencies": [
+    "recorder"
+  ],
   "codeowners": [
     "@meokey"
   ],
