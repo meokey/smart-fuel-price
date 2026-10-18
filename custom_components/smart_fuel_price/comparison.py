@@ -39,6 +39,12 @@ _VALUE_KEY_LABELS = {
     "state": "price",
 }
 
+# Step-by-step card guide (linked from the notification).
+_DOCS_URL = (
+    "https://github.com/meokey/smart-fuel-price/blob/main/docs/"
+    "Dashboard-cards.md#4-forecast-vs-nrc-reference-history-graph"
+)
+
 
 async def _load_state(hass) -> dict:
     """Load (and memory-cache) the comparison notification state."""
@@ -136,11 +142,21 @@ async def maybe_notify_comparison_ready(hass, city: str) -> bool:
         yaml_block = _comparison_yaml(city, forecast)
         message = (
             f"The NRC weekly price history for {city.capitalize()} "
-            f"({ready[city]} weeks) is now in long-term statistics, and "
-            f"{' and '.join(names)} also track this city.\n\n"
-            "Paste this card into your dashboard to compare the forecast "
-            "against the official weekly average:\n\n"
-            f"```yaml\n{yaml_block}\n```"
+            f"({ready[city]} weeks) is now in Home Assistant long-term "
+            f"statistics, and {' and '.join(names)} also track this city.\n\n"
+            "**Add the comparison card** (about 2 minutes):\n"
+            "1. Open your dashboard, then the menu (top right) -> "
+            "Edit dashboard -> Add card.\n"
+            "2. Search for `Manual`, select it, and delete the placeholder "
+            "text.\n"
+            "3. Paste the YAML below, then Save. The card shows the "
+            "forecast against the official weekly average.\n\n"
+            f"```yaml\n{yaml_block}\n```\n\n"
+            "Using the raw configuration editor instead? Paste the card as "
+            "an item under a view's `cards:` list -- not at the end of the "
+            "file. Indentation matters; a wrong indent is the most common "
+            "error.\n\n"
+            f"Step-by-step guide with pitfalls: [Dashboard cards]({_DOCS_URL})"
         )
         await hass.services.async_call(
             "persistent_notification",

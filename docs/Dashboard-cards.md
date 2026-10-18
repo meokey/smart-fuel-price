@@ -136,6 +136,39 @@ paying above the official average. The NRC line only moves weekly, so
 two weeks (`hours_to_show: 336`) shows about two steps — enough context
 without noise.
 
+### Adding the card, step by step
+
+**Method A — Manual card (recommended):**
+1. Open the dashboard → menu (top right) → **Edit dashboard** →
+   **Add card**.
+2. Search for `Manual` and select it.
+3. Delete the placeholder text in the editor, paste the card YAML,
+   then **Save**.
+
+**Method B — raw configuration editor:**
+1. Menu → Edit dashboard → menu → **Raw configuration editor**.
+2. Find the view you want, then its `cards:` list.
+3. Paste the card YAML as a new list item *under* `cards:`:
+
+```yaml
+views:
+  - title: Home
+    cards:
+      - type: statistics-graph   # <- the pasted card starts here,
+        title: ...               #    indented under "cards:"
+```
+
+> ⚠️ **Pitfalls**
+> - **Indentation is the #1 error.** In the raw editor the card must sit
+>   *under* a view's `cards:` key. Pasting at the end of the file
+>   (outside any view) always fails with a YAML error.
+> - In the Manual-card editor, replace the *entire* placeholder content —
+>   leftover template lines break the parse.
+> - The `smart_fuel_price:nrc_weekly_<city>` entry is a **statistic ID**,
+>   not an entity. It works in `statistics-graph` (and the History
+>   panel's source picker), but it won't appear in "Add card → By
+>   entity".
+
 ### Year-long NRC view (backfilled)
 
 The NRC device backfills its full weekly history (~1 year) into HA's

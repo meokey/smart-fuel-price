@@ -164,6 +164,11 @@ def test_notify_when_nrc_and_forecast_coexist():
     assert "sensor.toronto_today" in msg and "sensor.toronto_tomorrow" in msg
     assert "Gas Wizard" in msg
     assert "type: statistics-graph" in msg
+    # The message guides a novice: steps + docs hyperlink (#88).
+    assert "Add the comparison card" in msg
+    assert "Manual" in msg
+    assert "Dashboard-cards.md" in msg
+    assert "github.com/meokey/smart-fuel-price" in msg
 
 
 def test_notify_only_once_per_city():
