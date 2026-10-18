@@ -281,8 +281,10 @@ class NrcanGcCaProvider(BaseFuelPriceProvider):
             "has_sum": False,
         }
         if mean_type is not None:
-            # HA >= 2026.11: report_usage (then hard failure) if absent.
-            # No unit converter exists for ¢/L, so unit_class is None.
+            # HA 2026.11 compliance: report_usage (then hard failure) if
+            # absent. No unit converter exists for ¢/L, so unit_class is
+            # None. Audited Oct 2026 against HA core dev -- this metadata
+            # satisfies the 2026.11 statistics requirements.
             metadata["mean_type"] = mean_type
             metadata["unit_class"] = None
         statistics = []
