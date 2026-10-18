@@ -1420,10 +1420,11 @@ def test_nrcan_parses_nested_markup():
     assert data["current_price"] == 180.2
 
 
-def _stub_recorder(monkeypatch):
-    """Stub homeassistant.components.recorder.statistics in sys.modules."""
+def _stub_recorder(monkeypatch, with_mean_type=True):
+    """Stub homeassistant.components.recorder.* in sys.modules."""
     import sys
     import types
+    from enum import IntEnum
 
     calls = []
 
@@ -1447,6 +1448,19 @@ def _stub_recorder(monkeypatch):
         "homeassistant.components.recorder.statistics",
         stats_mod,
     )
+    if with_mean_type:
+        # Mirrors HA's StatisticMeanType (IntEnum: NONE=0, ARITHMETIC=1).
+        models_mod = types.ModuleType(
+            "homeassistant.components.recorder.models"
+        )
+        models_mod.StatisticMeanType = IntEnum(
+            "StatisticMeanType", {"NONE": 0, "ARITHMETIC": 1, "CIRCULAR": 2}
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "homeassistant.components.recorder.models",
+            models_mod,
+        )
     return calls
 
 
@@ -1502,6 +1516,9 @@ def test_nrcan_import_history_writes_external_statistics(monkeypatch):
     assert metadata["unit_of_measurement"] == "¢/L"
     assert metadata["has_mean"] is True
     assert metadata["has_sum"] is False
+    # HA >= 2026.11 requires these keys (#83).
+    assert metadata["mean_type"] == 1  # StatisticMeanType.ARITHMETIC
+    assert metadata["unit_class"] is None
     # Current-year page (2 rows) + previous-year page (404 -> skipped).
     assert len(statistics) == 2
     first = statistics[0]
@@ -1544,3 +1561,23 @@ def test_nrcan_import_history_survives_missing_recorder(monkeypatch):
     assert provider.fetch_data()["is_valid"] is True
     # Must not raise.
     asyncio.run(provider.async_import_history(object()))
+
+
+def test_nrcan_import_history_legacy_ha_omits_mean_type(monkeypatch):
+    """HA versions predating mean_type get has_mean only (#83)."""
+    import asyncio
+    from datetime import date
+    calls = _stub_recorder(monkeypatch, with_mean_type=False)
+    today = date.today()
+    html = _nrcan_html([
+        (today - timedelta(days=7), 180.2, 29.7, 13.8, 50.3),
+    ])
+    session = FakeSession({_nrcan_url(today.year): html})
+    provider = _nrcan_toronto_provider(session)
+    assert provider.fetch_data()["is_valid"] is True
+    asyncio.run(provider.async_import_history(object()))
+    assert len(calls) == 1
+    metadata, _statistics = calls[0]
+    assert metadata["has_mean"] is True
+    assert "mean_type" not in metadata
+    assert "unit_class" not in metadata
