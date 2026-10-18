@@ -104,7 +104,15 @@ hours_to_show: 168
 ## 4. Forecast vs NRC reference (history-graph)
 
 Overlay the forecast on the official NRC weekly average — the visual
-version of "is today's price high or low?". No entity changes needed:
+version of "is today's price high or low?".
+
+> **Tip:** you don't have to build this by hand. When the NRC weekly
+> history is imported for a city that a forecast provider (Gas Wizard /
+> CityNews) also tracks — in either order — the integration sends you a
+> persistent notification with ready-to-paste YAML for this card. One per
+> city; dismissing it won't re-fire.
+
+No entity changes needed:
 every price sensor uses ¢/L with `state_class: measurement`, so the
 forecast (daily steps) and the NRC average (weekly steps) share one
 axis natively. Replace the entity IDs with yours
