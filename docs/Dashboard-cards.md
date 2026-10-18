@@ -194,6 +194,9 @@ integration fetches accumulates history from the day you install it.
 The NRC backfill is the special case: it injects the year *before* you
 installed, which the recorder could never have seen.)
 
+> The backfill metadata complies with the HA 2026.11 statistics
+> requirements (`mean_type` / `unit_class`; audited Oct 2026).
+
 ---
 
 ## Blueprint: evening rise alert
