@@ -27,10 +27,12 @@ _DEVICE_MODEL = {
     "gasbuddy_ca": "Gas station",
     "affordableenergy_ca": "City fuel forecast",
     "citynews_ca": "City fuel price",
+    "nrcan_gc_ca": "Weekly reference",
 }
 from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.citynews_ca import CityNewsCaProvider
 from .providers.gasbuddy_ca import GasBuddyStationProvider
+from .providers.nrcan_gc_ca import NrcanGcCaProvider
 
 _LOGGER = logging.getLogger(__name__)
 # Underlying HA poll trigger -- the provider's TTL cache (editable in the
@@ -350,6 +352,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         provider = CityNewsCaProvider(city)
     elif provider_type == "affordableenergy_ca":
         provider = AffordableEnergyCaProvider(city)
+    elif provider_type == "nrcan_gc_ca":
+        provider = NrcanGcCaProvider(city)
     else:
         # No silent fallback: an unknown (or removed, e.g. fuelwise_app)
         # provider string must fail loudly, not masquerade as Gas Wizard.
@@ -370,6 +374,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             ("Today's Price", "current_price", "today"),
             ("Tomorrow's Forecast", "tomorrow_price", "tomorrow"),
         ]
+    elif provider_type == "nrcan_gc_ca":
+        # Single reference anchor: the official weekly average. The entity
+        # name falls back to provider.sensor_name ("NRC Weekly Average").
+        specs = [(None, "current_price", "weekly")]
     else:
         specs = [(None, "state", None)]
 
