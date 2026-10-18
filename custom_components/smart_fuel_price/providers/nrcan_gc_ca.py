@@ -139,16 +139,14 @@ _CITY_LOCATION_IDS: dict[str, int] = {
 # after this map was curated, without a code change.
 _DISCOVERED_IDS: dict[str, int] = {}
 
-# <tr><td>2026-10-13</td><td>184.6</td><td>30.2</td><td>13.3</td><td>59.3</td></tr>
-# The three component columns are optional -- the price is what matters.
-_WEEK_ROW_RE = re.compile(
-    r"<tr[^>]*>\s*<td[^>]*>\s*(20\d{2}-\d{2}-\d{2})\s*</td>"
-    r"\s*<td[^>]*>\s*([\d.]+)\s*</td>"
-    r"(?:\s*<td[^>]*>\s*([\d.]+)\s*</td>"
-    r"\s*<td[^>]*>\s*([\d.]+)\s*</td>"
-    r"\s*<td[^>]*>\s*([\d.]+)\s*</td>)?",
-    re.IGNORECASE,
-)
+# Row/cell splitter (tolerant of attributes and nested markup inside
+# cells -- ColdFusion-era tables vary); the date fullmatch below is what
+# identifies a data row.
+_TR_RE = re.compile(r"<tr[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+_TD_RE = re.compile(r"<td[^>]*>(.*?)</td>", re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+_DATE_RE = re.compile(r"20\d{2}-\d{2}-\d{2}")
+_NUM_RE = re.compile(r"[\d.]+")
 
 # City links on the index page, e.g.
 # <a href="prices_byfuel_e.cfm?locationID=17&...">Toronto</a>
@@ -173,25 +171,30 @@ def _slugify(name: str) -> str:
 def _parse_weekly_rows(html: str) -> list[tuple[str, float, dict[str, float]]]:
     """Extract (week_ending, price, components) rows from a bycity page."""
     rows = []
-    for match in _WEEK_ROW_RE.finditer(html):
-        week_ending, price = match.group(1), match.group(2)
+    for row_match in _TR_RE.finditer(html):
+        cells = [
+            _TAG_RE.sub("", cell).strip()
+            for cell in _TD_RE.findall(row_match.group(1))
+        ]
+        if len(cells) < 2 or not _DATE_RE.fullmatch(cells[0]):
+            continue
         try:
-            price_f = float(price)
-        except ValueError:
+            price_f = float(_NUM_RE.search(cells[1]).group())
+        except (ValueError, AttributeError):
             continue
         if price_f <= 0:
             continue
         components: dict[str, float] = {}
-        if match.group(3) is not None:
+        if len(cells) >= 5:
             try:
                 components = {
-                    "taxes": float(match.group(3)),
-                    "marketing_margin": float(match.group(4)),
-                    "refining_margin": float(match.group(5)),
+                    "taxes": float(_NUM_RE.search(cells[2]).group()),
+                    "marketing_margin": float(_NUM_RE.search(cells[3]).group()),
+                    "refining_margin": float(_NUM_RE.search(cells[4]).group()),
                 }
-            except (ValueError, TypeError):
+            except (ValueError, AttributeError):
                 components = {}
-        rows.append((week_ending, price_f, components))
+        rows.append((cells[0], price_f, components))
     # Deduplicate (the page can repeat the table) and sort by date.
     seen: dict[str, tuple[float, dict[str, float]]] = {}
     for week_ending, price_f, components in rows:

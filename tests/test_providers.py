@@ -1402,3 +1402,19 @@ def test_nrcan_discover_cities_parses_index():
     # locationName-only links are listed but carry no ID.
     assert "vancouver" not in _DISCOVERED_IDS
     _DISCOVERED_IDS.clear()
+
+
+def test_nrcan_parses_nested_markup():
+    """Real-world tables may wrap cells in spans or carry td attributes."""
+    from datetime import date
+    today = date.today()
+    html = (
+        "<table><tr><th>Week Ending</th><th>Price</th></tr>"
+        '<tr class="odd"><td align="left">%s</td>'
+        '<td><span class="num">%.1f</span></td></tr></table>'
+        % ((today - timedelta(days=7)).isoformat(), 180.2)
+    )
+    session = FakeSession({_nrcan_url(today.year): html})
+    data = _nrcan_toronto_provider(session).fetch_data()
+    assert data["is_valid"] is True
+    assert data["current_price"] == 180.2
