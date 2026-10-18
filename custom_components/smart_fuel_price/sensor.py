@@ -33,6 +33,10 @@ from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.citynews_ca import CityNewsCaProvider
 from .providers.gasbuddy_ca import GasBuddyStationProvider
 from .providers.nrcan_gc_ca import NrcanGcCaProvider
+from .comparison import (
+    maybe_notify_comparison_ready,
+    record_nrc_history_ready,
+)
 
 _LOGGER = logging.getLogger(__name__)
 # Underlying HA poll trigger -- the provider's TTL cache (editable in the
@@ -623,7 +627,14 @@ class SmartFuelSensor(SensorEntity):
                 if isinstance(self._provider, NrcanGcCaProvider) and data.get(
                     "is_valid"
                 ):
-                    await self._provider.async_import_history(self.hass)
+                    weeks = await self._provider.async_import_history(self.hass)
+                    if weeks:
+                        await record_nrc_history_ready(
+                            self.hass, self._provider.city, weeks
+                        )
+                    await maybe_notify_comparison_ready(
+                        self.hass, self._provider.city
+                    )
             else:
                 _LOGGER.warning("Received empty data payload from provider: %s", self._provider.name)
 
@@ -635,3 +646,12 @@ class SmartFuelSensor(SensorEntity):
         # retries all flow through _async_fetch, so schedule/cancel lives
         # in exactly one place.
         await _update_retry_schedule(self)
+
+        # Comparison notification (#85), reverse direction: a newly added
+        # forecast sensor fires this on its first fetch when the NRC
+        # history for its city is already imported. Cheap no-op once the
+        # city has been notified (or when nothing lines up yet).
+        if not isinstance(
+            self._provider, (NrcanGcCaProvider, GasBuddyStationProvider)
+        ):
+            await maybe_notify_comparison_ready(self.hass, self._provider.city)

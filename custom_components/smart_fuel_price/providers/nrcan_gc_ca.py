@@ -232,7 +232,7 @@ class NrcanGcCaProvider(BaseFuelPriceProvider):
         """
         return list(self._history_series)
 
-    async def async_import_history(self, hass: Any) -> None:
+    async def async_import_history(self, hass: Any) -> int:
         """Backfill the weekly series into HA long-term statistics.
 
         Uses the recorder's public external-statistics API; the import is
@@ -244,10 +244,13 @@ class NrcanGcCaProvider(BaseFuelPriceProvider):
         The import is lazy on purpose: provider modules must stay
         importable with only stdlib + requests (see tests/conftest.py and
         scripts/gen_docs.py).
+
+        Returns the number of weeks imported (0 when there was nothing to
+        do or the import failed).
         """
         series = self._history_series
         if not series:
-            return
+            return 0
         try:
             from homeassistant.components.recorder.statistics import (
                 async_add_external_statistics,
@@ -258,7 +261,7 @@ class NrcanGcCaProvider(BaseFuelPriceProvider):
                 "skipping history import.",
                 self.name,
             )
-            return
+            return 0
         try:
             # StatisticMeanType exists on HA versions new enough to
             # require mean_type/unit_class (2026.11 enforces them).
@@ -307,13 +310,14 @@ class NrcanGcCaProvider(BaseFuelPriceProvider):
                 self.city,
                 exc_info=True,
             )
-        else:
-            _LOGGER.debug(
-                "[%s] Imported %d weeks of history for '%s'.",
-                self.name,
-                len(statistics),
-                self.city,
-            )
+            return 0
+        _LOGGER.debug(
+            "[%s] Imported %d weeks of history for '%s'.",
+            self.name,
+            len(statistics),
+            self.city,
+        )
+        return len(statistics)
 
     @property
     def name(self) -> str:

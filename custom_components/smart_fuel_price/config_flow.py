@@ -41,7 +41,7 @@ _PROVIDER_CLASSES = {
     # city-based, and has no get_supported_cities()/discover_cities().
 }
 
-_CITY_CACHE_VERSION = 2
+_CITY_CACHE_VERSION = 3  # v3: discovery no longer drops verified cities (#87)
 _CITY_CACHE_KEY = f"{DOMAIN}_city_cache"
 _CITY_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # 1 week -- these lists barely change
 _CITY_CACHE_RETRY_SECONDS = 60 * 60  # 1 hour -- retry soon after a failed refresh
@@ -99,11 +99,14 @@ async def _get_cities_for_provider_unsafe(hass, provider_key: str, provider_cls)
 
     discovered = await hass.async_add_executor_job(provider_cls.discover_cities)
     if discovered:
-        # Maintainer observability: delta probing trusts the verified set,
-        # so a city removed from the source would otherwise go unnoticed
-        # (the dropdown just follows the sitemap). A partial/broken
-        # discovery could false-positive here; it self-resolves on the
-        # next successful refresh.
+        # Maintainer observability: discovery may ADD candidates, but never
+        # REMOVE verified cities -- a city missing from the index can still
+        # have a working data page (seen live: NRC dropped Toronto from its
+        # index while the bycity table kept serving it, #87). The curated
+        # list is the authority; the warning below is a maintainer signal,
+        # not an automatic dropdown change. A partial/broken discovery
+        # could false-positive here; it self-resolves on the next
+        # successful refresh.
         removed = sorted(set(provider_cls.verified_cities()) - set(discovered))
         if removed:
             _LOGGER.warning(
@@ -115,7 +118,7 @@ async def _get_cities_for_provider_unsafe(hass, provider_key: str, provider_cls)
                 "city" if len(removed) == 1 else "cities",
                 ", ".join(removed),
             )
-        cities = sorted(discovered.keys())
+        cities = sorted(set(discovered.keys()) | set(provider_cls.verified_cities()))
         cities = await hass.async_add_executor_job(
             filter_cities_with_prices, provider_cls, cities
         )

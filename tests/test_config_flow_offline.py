@@ -178,7 +178,10 @@ def test_happy_path_still_discovers_and_filters():
         cls, "discover_cities", classmethod(lambda c: {"toronto": "T", "edmonton": "E"})
     ), patch.object(cls, "city_has_prices", classmethod(lambda c, city, session=None: city != "edmonton")):
         cities = _cities("citynews_ca")
-    assert cities == ["toronto"]
+    assert "toronto" in cities
+    assert "edmonton" not in cities
+    # Verified cities are never dropped by discovery (#87).
+    assert set(cls.verified_cities()) <= set(cities)
 
 
 def test_store_version_mismatch_refreshes_instead_of_erroring(caplog):
@@ -200,10 +203,11 @@ def test_store_version_mismatch_refreshes_instead_of_erroring(caplog):
         cls, "city_has_prices", classmethod(lambda c, city, session=None: True)
     ), caplog.at_level(logging.INFO, logger="custom_components.smart_fuel_price.config_flow"):
         cities = _cities("affordableenergy_ca")
-    assert cities == ["toronto"]
+    assert "toronto" in cities
     assert "falling back" not in caplog.text
     # Self-healed: the refreshed cache was saved under the current version.
-    assert MigratingStore._db[(cf._CITY_CACHE_VERSION, cf._CITY_CACHE_KEY)]["affordableenergy_ca"]["cities"] == ["toronto"]
+    saved = MigratingStore._db[(cf._CITY_CACHE_VERSION, cf._CITY_CACHE_KEY)]["affordableenergy_ca"]["cities"]
+    assert "toronto" in saved
 
 
 def test_sitemap_removal_warns(caplog):
@@ -214,9 +218,11 @@ def test_sitemap_removal_warns(caplog):
         logging.WARNING, logger="custom_components.smart_fuel_price.config_flow"
     ):
         cities = _cities("affordableenergy_ca")
-    assert cities == ["toronto"]
+    assert "toronto" in cities
     assert "no longer in the discovery source" in caplog.text
     assert "vancouver-gas-prices" in caplog.text
+    # ...but the removed verified city stays selectable (#87).
+    assert "vancouver-gas-prices" in cities
 
 
 def test_sitemap_no_removal_no_warning(caplog):
@@ -235,3 +241,23 @@ def test_sitemap_no_removal_no_warning(caplog):
     # burnaby probed (unverified) and dropped; verified kept; no warning.
     assert set(cities) == set(cls.verified_cities())
     assert "no longer in the discovery source" not in caplog.text
+
+
+def test_discovery_never_drops_verified_cities():
+    """A verified city missing from discovery stays in the dropdown (#87).
+
+    Seen live: NRC's index stopped linking Toronto while its data page
+    kept serving -- the dropdown must keep trusting the curated list.
+    """
+    cls = cf._PROVIDER_CLASSES["nrcan_gc_ca"]
+    assert "toronto" in cls.verified_cities()
+    with patch.object(
+        cls, "discover_cities", classmethod(lambda c: {"vancouver": "Vancouver"})
+    ), patch(
+        "custom_components.smart_fuel_price.config_flow.filter_cities_with_prices",
+        side_effect=lambda cls_, cities: cities,
+    ):
+        cities = _cities("nrcan_gc_ca")
+    assert "toronto" in cities
+    # ...and genuinely new discoveries are still added.
+    assert "vancouver" in cities
