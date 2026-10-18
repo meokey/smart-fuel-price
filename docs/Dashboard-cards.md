@@ -101,6 +101,33 @@ entities:
 hours_to_show: 168
 ```
 
+## 4. Forecast vs NRC reference (history-graph)
+
+Overlay the forecast on the official NRC weekly average — the visual
+version of "is today's price high or low?". No entity changes needed:
+every price sensor uses ¢/L with `state_class: measurement`, so the
+forecast (daily steps) and the NRC average (weekly steps) share one
+axis natively. Replace the entity IDs with yours
+(☰ → Settings → Tools → States); you need both a forecast device and
+an NRC device for the same city.
+
+```yaml
+type: history-graph
+entities:
+  - entity: sensor.smart_fuel_price_toronto_today_s_price
+    name: Gas Wizard today
+  - entity: sensor.smart_fuel_price_toronto_tomorrow_s_forecast
+    name: Gas Wizard tomorrow
+  - entity: sensor.smart_fuel_price_toronto_nrc_weekly_average
+    name: NRC weekly avg
+hours_to_show: 336
+```
+
+When the forecast line sits consistently above the NRC line, you're
+paying above the official average. The NRC line only moves weekly, so
+two weeks (`hours_to_show: 336`) shows about two steps — enough context
+without noise.
+
 ---
 
 ## Blueprint: evening rise alert
