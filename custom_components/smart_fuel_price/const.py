@@ -17,6 +17,9 @@ DEFAULT_CACHE_TTL_MINUTES = {
     "affordableenergy_ca": 240,
     "citynews_ca": 240,
     "gasbuddy_ca": 30,
+    # NRC moves weekly; a daily safety margin keeps the reference fresh
+    # without re-reading a static table.
+    "nrcan_gc_ca": 1440,
 }
 
 CONF_FUEL_GRADES = "fuel_grades"
@@ -31,7 +34,8 @@ GASBUDDY_FUEL_GRADES = {
 AVAILABLE_PROVIDERS = {
     "affordableenergy_ca": "Canada (Gas Wizard)",
     "citynews_ca": "Canada (CityNews)",
-    "gasbuddy_ca": "GasBuddy (Station)"
+    "gasbuddy_ca": "GasBuddy (Station)",
+    "nrcan_gc_ca": "Canada (NRC Weekly)",
 }
 
 # Attributes that users can choose to disable in Options Flow
@@ -52,4 +56,8 @@ OPTIONAL_ATTRIBUTES = [
     "last_reported_str",
     "from_cache",
     "stale",
+    "week_ending",
+    "price_taxes",
+    "price_marketing_margin",
+    "price_refining_margin",
 ]

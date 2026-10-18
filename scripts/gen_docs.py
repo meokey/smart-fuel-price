@@ -46,11 +46,15 @@ from custom_components.smart_fuel_price.providers.citynews_ca import (  # noqa: 
 from custom_components.smart_fuel_price.providers.gasbuddy_ca import (  # noqa: E402
     GasBuddyStationProvider,
 )
+from custom_components.smart_fuel_price.providers.nrcan_gc_ca import (  # noqa: E402
+    NrcanGcCaProvider,
+)
 
 PROVIDERS: list[tuple[str, type[BaseFuelPriceProvider]]] = [
     ("affordableenergy_ca", AffordableEnergyCaProvider),
     ("citynews_ca", CityNewsCaProvider),
     ("gasbuddy_ca", GasBuddyStationProvider),
+    ("nrcan_gc_ca", NrcanGcCaProvider),
 ]
 
 START_MARKER = "<!-- GENERATED:PROVIDER_COVERAGE:START -->"
@@ -67,6 +71,8 @@ def _discovery_label(cls: type[BaseFuelPriceProvider]) -> str:
         return "gaswizard.ca sitemap"
     if cls is CityNewsCaProvider:
         return "citynews.ca city switcher"
+    if cls is NrcanGcCaProvider:
+        return "nrcan.gc.ca city index"
     return "yes"
 
 

@@ -29,12 +29,14 @@ from .providers.affordableenergy_ca import AffordableEnergyCaProvider
 from .providers.base import filter_cities_with_prices
 from .providers.citynews_ca import CityNewsCaProvider
 from .providers.gasbuddy_ca import GasBuddyStationProvider
+from .providers.nrcan_gc_ca import NrcanGcCaProvider
 
 _LOGGER = logging.getLogger(__name__)
 
 _PROVIDER_CLASSES = {
     "citynews_ca": CityNewsCaProvider,
     "affordableenergy_ca": AffordableEnergyCaProvider,
+    "nrcan_gc_ca": NrcanGcCaProvider,
     # gasbuddy_ca deliberately excluded: it's station-based, not
     # city-based, and has no get_supported_cities()/discover_cities().
 }

@@ -514,7 +514,7 @@ def test_all_provider_modules_import_cleanly():
     import importlib
     for module_name in (
         "base", "vendor_widgets", "citynews_ca",
-        "affordableenergy_ca", "gasbuddy_ca",
+        "affordableenergy_ca", "gasbuddy_ca", "nrcan_gc_ca",
     ):
         importlib.import_module(f"sfp_providers.{module_name}")
 
@@ -544,8 +544,10 @@ def test_city_lists_are_well_formed():
     """Cheap, no-network sanity check on each provider's own city list."""
     from sfp_providers.affordableenergy_ca import AffordableEnergyCaProvider
     from sfp_providers.citynews_ca import CityNewsCaProvider
+    from sfp_providers.nrcan_gc_ca import NrcanGcCaProvider
 
-    for provider_cls in (CityNewsCaProvider, AffordableEnergyCaProvider):
+    for provider_cls in (CityNewsCaProvider, AffordableEnergyCaProvider,
+                         NrcanGcCaProvider):
         cities = provider_cls.get_supported_cities()
         assert cities, f"{provider_cls.__name__} returned an empty city list"
         assert len(cities) == len(set(cities)), f"{provider_cls.__name__} has duplicate cities"
@@ -1279,3 +1281,124 @@ def test_gaswizard_verified_cities_covers_sitemap_slugs():
     assert len(AffordableEnergyCaProvider.verified_cities()) == 49
     assert AffordableEnergyCaProvider.verified_cities() == frozenset(CITY_SLUGS)
     assert "burnaby" not in AffordableEnergyCaProvider.verified_cities()
+
+
+# ---------------------------------------------------------------------------
+# NRC weekly average provider (nrcan_gc_ca) -- offline via injected sessions.
+# ---------------------------------------------------------------------------
+
+def _nrcan_html(rows):
+    """Build a minimal NRC bycity-style weekly table.
+
+    rows are (date, price, taxes, marketing_margin, refining_margin) tuples.
+    """
+    body = "".join(
+        "<tr><td>%s</td><td>%.1f</td><td>%.1f</td><td>%.1f</td><td>%.1f</td></tr>"
+        % (d.isoformat(), p, t, m, r)
+        for d, p, t, m, r in rows
+    )
+    return (
+        "<html><body><h1>Weekly Average Retail Prices for Regular Gasoline</h1>"
+        "<table><tr><th>Week Ending</th><th>Price</th><th>Taxes</th>"
+        "<th>Marketing Margin</th><th>Refining Margin</th></tr>"
+        + body + "</table></body></html>"
+    )
+
+
+def _nrcan_url(year, location_id=17):
+    return (
+        "https://www2.nrcan.gc.ca/eneene/sources/pripri/prices_bycity_e.cfm"
+        f"?priceYear={year}&productID=1&locationID={location_id}&frequency=W"
+    )
+
+
+def _nrcan_toronto_provider(session):
+    from sfp_providers.nrcan_gc_ca import NrcanGcCaProvider
+    return NrcanGcCaProvider("toronto", session=session)
+
+
+def test_nrcan_parses_latest_completed_week():
+    """Picks the newest row strictly before today; skips the partial future row."""
+    from datetime import date
+    today = date.today()
+    html = _nrcan_html([
+        (today - timedelta(days=14), 184.6, 30.2, 13.3, 59.3),
+        (today - timedelta(days=7), 180.2, 29.7, 13.8, 50.3),
+        (today + timedelta(days=3), 175.0, 29.0, 12.0, 48.0),  # partial week
+    ])
+    session = FakeSession({_nrcan_url(today.year): html})
+    data = _nrcan_toronto_provider(session).fetch_data()
+    assert data["is_valid"] is True
+    assert data["current_price"] == 180.2
+    assert data["week_ending"] == (today - timedelta(days=7)).isoformat()
+    assert data["price_taxes"] == 29.7
+
+
+def test_nrcan_falls_back_to_previous_year():
+    """Around New Year the latest completed week may live on last year's page."""
+    from datetime import date
+    today = date.today()
+    current_html = _nrcan_html([
+        (today + timedelta(days=3), 175.0, 29.0, 12.0, 48.0),
+    ])
+    prev_html = _nrcan_html([
+        (today - timedelta(days=370), 150.0, 28.0, 10.0, 40.0),
+    ])
+    session = FakeSession({
+        _nrcan_url(today.year): current_html,
+        _nrcan_url(today.year - 1): prev_html,
+    })
+    data = _nrcan_toronto_provider(session).fetch_data()
+    assert data["is_valid"] is True
+    assert data["current_price"] == 150.0
+    assert _nrcan_url(today.year - 1) in session.requested
+
+
+def test_nrcan_unparseable_page_fails_soft():
+    session = FakeSession({_nrcan_url(datetime.now().year): "<html>no table here</html>"})
+    data = _nrcan_toronto_provider(session).fetch_data()
+    assert data["is_valid"] is False
+    assert data["current_price"] is None
+
+
+def test_nrcan_unknown_city_fails_soft():
+    from sfp_providers.nrcan_gc_ca import NrcanGcCaProvider
+    data = NrcanGcCaProvider("atlantis", session=FakeSession({})).fetch_data()
+    assert data["is_valid"] is False
+
+
+def test_nrcan_reference_semantics():
+    """A lagged anchor: weekly poll, no forecast, stale beats empty."""
+    from sfp_providers.nrcan_gc_ca import NrcanGcCaProvider
+    provider = NrcanGcCaProvider("toronto", session=FakeSession({}))
+    assert provider.scan_interval == timedelta(days=7)
+    assert provider.supports_forecast is False
+    assert provider.allow_stale_on_failure is True
+    assert provider.sensor_name == "NRC Weekly Average"
+    assert provider.name == "Natural Resources Canada"
+
+
+def test_nrcan_discover_cities_parses_index():
+    from sfp_providers.nrcan_gc_ca import NrcanGcCaProvider, _DISCOVERED_IDS
+    html = (
+        '<a href="prices_byfuel_e.cfm?locationID=17&x=1">Toronto</a>'
+        '<a href="prices_byfuel_e.cfm?locationName=Vancouver">Vancouver</a>'
+        '<a href="prices_byfuel_e.cfm?locationID=99">CANADA</a>'
+    )
+    session = FakeSession(
+        {"https://www2.nrcan.gc.ca/eneene/sources/pripri/"
+         "prices_byfuel_e.cfm?locationName=Toronto": html}
+    )
+    import sfp_providers.nrcan_gc_ca as mod
+    orig_build = NrcanGcCaProvider._build_session
+    NrcanGcCaProvider._build_session = classmethod(lambda cls: session)
+    try:
+        _DISCOVERED_IDS.clear()
+        found = NrcanGcCaProvider.discover_cities()
+    finally:
+        NrcanGcCaProvider._build_session = orig_build
+    assert found == {"toronto": "Toronto", "vancouver": "Vancouver"}
+    assert _DISCOVERED_IDS.get("toronto") == 17
+    # locationName-only links are listed but carry no ID.
+    assert "vancouver" not in _DISCOVERED_IDS
+    _DISCOVERED_IDS.clear()
