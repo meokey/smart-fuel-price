@@ -15,7 +15,8 @@ On the integration entry, click the gear icon → **Configure**:
   Home Assistant database (useful for trimming DB growth).
 - **Cache threshold (minutes)** — how long fetched data is reused before
   hitting the network again. Presets: 240 min for forecast providers
-  (Gas Wizard, CityNews), 30 min for GasBuddy. Range 5–1440.
+  (Gas Wizard, CityNews), 30 min for GasBuddy, 1440 min for NRC Weekly.
+  Range 5–1440.
 
 ## Entities per entry
 
@@ -45,6 +46,15 @@ One sensor per (station, fuel grade): **Current Price (Regular)** etc.
 Attributes include `station_name`, `phone`, `address`, `latitude`,
 `longitude`, `last_reported_str`, and `stale` (true while serving cached
 data during an outage).
+
+### NRC Weekly device
+
+One sensor: **NRC Weekly Average** — Natural Resources Canada's official
+average retail price for the latest *completed* week, in ¢/L. It is a
+reference anchor, not a forecast: there is no Buy-now sensor, and the
+entry fetches at most once a day. The first fetch also backfills the
+city's weekly history into Home Assistant's long-term statistics, so the
+official average can be graphed against a forecast (see Dashboard cards).
 
 ## Device & entity naming
 

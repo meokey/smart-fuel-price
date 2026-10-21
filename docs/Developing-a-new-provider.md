@@ -50,6 +50,8 @@ Useful overrides:
 | `requires_api_key` | `False` | `True` if the source needs a key (config flow will prompt) |
 | `get_supported_cities()` | `[]` | Static list of city slugs, e.g. `["toronto", "ottawa"]` |
 | `discover_cities()` | `None` | Optional live discovery; keep it cheap, callers cache it |
+| `verified_cities()` | `[]` | City slugs confirmed to have data — always kept in the config-flow dropdown, even if discovery stops listing them |
+| `city_has_prices(city)` | `True` | Dropdown filter: return `False` for cities the source lists but serves no prices for |
 | `source_url` | `None` | Canonical page URL — shown as a link on the device card |
 | `cache_key` | `ClassName:city` | Override when the provider has extra identity (e.g. fuel grade) |
 | `allow_stale_on_failure` | `False` | `True` for live prices where old data beats no data (served with `stale: True`); keep `False` for forecasts |
@@ -115,5 +117,6 @@ are created automatically for every device — no extra work needed.
 - [ ] Registered in `const.py`, `config_flow.py`, `sensor.py`
 - [ ] Units in ¢/L; read-only access only (no POST/submit)
 - [ ] `pytest` green, including new offline tests
+- [ ] Docs updated in the same PR (run `scripts/gen_docs.py` if provider coverage changed)
 - [ ] If you plan to implement it yourself, say so on the tracking issue
       (the issue templates ask) so work doesn't collide

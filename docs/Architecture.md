@@ -1,7 +1,7 @@
 # Architecture
 
 How the integration is put together and how data flows through it.
-Diagrams are Mermaid (rendered natively by GitHub) and track the code as of **v2.6.1**.
+Diagrams are Mermaid (rendered natively by GitHub) and track the code as of **v2.7.6**.
 
 - [0. Overview](#0-overview) — modules, who reuses what
 - [1. Fetch pipeline](#1-fetch-pipeline) — the shared core every sensor uses
@@ -28,7 +28,7 @@ flowchart TD
         E --> G["BaseFuelPriceProvider.get_data()<br/>★ shared fetch pipeline (§1)"]
         G --> H["in-memory TTL cache<br/>(per provider)"]
         G --> I[".storage persisted cache<br/>(hydrated on restart)"]
-        J["price sensors<br/>(today / tomorrow / change)<br/>+ buy-now binary sensor"] --> G
+        J["price sensors<br/>(today / tomorrow / change;<br/>NRC: weekly average)<br/>+ buy-now binary sensor"] --> G
         K["Last updated sensor"] -->|"reads provider.last_successful_fetch live"| E
         L["Update status sensor"] -->|"reads provider.last_fetch_status live"| E
     end
@@ -45,6 +45,10 @@ Notes:
   slow provider's fetch lands.
 - Retries/backoff policy (request politeness) is documented in
   [Providers](Providers.md); the mechanics are in §1 below.
+- Two **fetch side effects** live in the sensor platform, not the pipeline:
+  a fresh NRC payload imports the city's weekly history into recorder
+  statistics, and fresh payloads run the comparison check that can raise
+  the one-time graph-card notification (§3).
 
 ## 1. Fetch pipeline
 
@@ -114,7 +118,7 @@ Never raises: any failure falls back to the provider's static curated list.
 ```mermaid
 flowchart TD
     A["config flow: provider selected"]
-    A --> B["Store: load city cache (v2)"]
+    A --> B["Store: load city cache (v3)"]
     B --> C{"cache fresh?<br/>(1-week TTL)"}
     C -->|"yes"| D["return cached city list"]
     C -->|"no"| E{"version mismatch?<br/>(NotImplementedError)"}
@@ -129,7 +133,7 @@ flowchart TD
     L -->|"yes"| M["keep"]
     L -->|"probe raised (fail-open)"| M
     L -->|"no"| N["drop (e.g. Burnaby)"]
-    M --> O["save Store (v2, 1-week TTL)"]
+    M --> O["save Store (v3, 1-week TTL)"]
     N --> O
     O --> P["alphabetical dropdown"]
 ```
@@ -141,6 +145,11 @@ Key semantics:
   (Burnaby), not fifty.
 - **Removal detection** (v2.5.6+): verified cities missing from a successful
   discovery log a warning naming them.
+- **Verified cities are never dropped** (v2.7.3+, #87): the dropdown is
+  discovered ∪ verified. Discovery may *add* cities, but a verified city
+  that vanishes from the source's index stays listed — Toronto left the
+  NRC city index while its data page kept working, which is exactly the
+  failure this rule prevents. The warning above still fires.
 - Probes are structural (≥1 dated entry), date-independent — a today-date
   check would false-negative before the evening forecast publish.
 
@@ -178,6 +187,18 @@ payloads were persisted, so GasWizard morning fetches (`tomorrow_pending`,
 fresh today's price but forecast not yet published) never reached `.storage`;
 after a restart **Last updated** fell back to the last evening persist, days
 stale (#78).
+
+**Fetch side effects** (in `sensor.py`, after a healthy serving): a fresh
+NRC payload imports the city's completed-week history (current + previous
+year pages) into the recorder as an external statistic
+(`smart_fuel_price:nrc_weekly_<city>`; the metadata carries
+`mean_type`/`unit_class`, satisfying HA 2026.11), and fresh payloads in
+either direction run the comparison check — when a city has both a
+forecast series and NRC history, a one-time persistent notification
+offers the statistics-graph card recipe (see
+[Dashboard cards](Dashboard-cards.md)). Both are best-effort: a failure
+logs a warning and never affects the fetch itself. NRC entries fetch at
+most once a day (default cache TTL 1440 min); the source moves weekly.
 
 ## 4. Manual refresh
 

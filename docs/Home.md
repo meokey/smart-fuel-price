@@ -4,12 +4,13 @@
 
 Know **tomorrow's** fuel price **today** — and whether to fill up now or wait.
 Smart Fuel Price is a Home Assistant custom integration tracking Canadian
-fuel prices across three read-only sources (see
+fuel prices across four read-only sources (see
 [Providers](https://github.com/meokey/smart-fuel-price/wiki/Providers)):
 
 - **Gas Wizard** — daily forecast per city: today's price + tomorrow's predicted price
 - **CityNews** — daily price-change forecasts for major cities
 - **GasBuddy** — live per-station prices for any station, per fuel grade
+- **NRC Weekly** — Natural Resources Canada's official weekly average per city: a reference anchor for judging whether today's price is high or low
 
 Why it's useful:
 
