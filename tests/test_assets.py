@@ -33,6 +33,23 @@ def test_hacs_json_is_valid():
     _load(HACS_JSON_PATH)
 
 
+def test_manifest_requirements_stay_empty():
+    """manifest requirements must stay [] (#91).
+
+    hassfest (validate_custom_requirements, HA 2026.10+) rejects any
+    requirement that is itself a dependency of Home Assistant ("must
+    not be listed in the manifest of a custom integration") -- this is
+    why voluptuous was removed. voluptuous and requests are HA core
+    dependencies, so they are importable at runtime without being
+    listed. The standalone hassfest action cannot catch a regression
+    (it builds its core-requirements list from the repo-root
+    requirements.txt, which is empty of package names), so this test
+    is the guard: if a real third-party dependency is ever needed,
+    update this test deliberately in the same change.
+    """
+    assert _load(MANIFEST_PATH)["requirements"] == []
+
+
 def test_translations_cover_every_config_flow_error_code():
     """Every errors["base"] = "..." value config_flow.py can set needs a
     matching translation, or HA shows the user the raw, untranslated key."""
