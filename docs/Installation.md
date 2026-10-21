@@ -2,8 +2,13 @@
 
 ## Via HACS (recommended)
 
-The integration is not in the HACS default store yet — add it as a custom
-repository for now:
+1. Open **HACS** in your Home Assistant sidebar.
+2. Search for `Smart Fuel Price`.
+3. Click **Download**.
+4. Restart Home Assistant Core.
+
+If the integration doesn't show up in the HACS search yet, add it as a
+custom repository instead:
 
 1. Open **HACS** in your Home Assistant sidebar.
 2. Go to **Integrations**.

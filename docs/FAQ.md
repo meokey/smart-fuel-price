@@ -24,10 +24,10 @@ EV pricing is per kWh, so it will be a separate device type.
 **Is this in the HACS default store?**
 Not yet — install via custom repository for now (see
 [Installation](https://github.com/meokey/smart-fuel-price/wiki/Installation)).
-The default-store application was submitted on Oct 10, 2026 and is awaiting
-review: [hacs/default#11765](https://github.com/hacs/default/pull/11765)
-(~1,599 PRs ahead in the review queue as of Oct 14, 2026 — the PR page
-itself always shows the live status).
+The default-store application ([hacs/default#11765](https://github.com/hacs/default/pull/11765))
+was submitted on Oct 10, 2026 and reviewed by a HACS maintainer on
+Oct 21, 2026; the requested changes shipped in v2.7.6 and a re-review has
+been requested. The PR page itself always shows the live status.
 
 **How do I report a bug or request a feature?**
 Use the [issue templates](https://github.com/meokey/smart-fuel-price/issues/new/choose).
