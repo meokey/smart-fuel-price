@@ -35,10 +35,17 @@ A Home Assistant custom integration that tracks fuel prices for Canadian cities 
 
 ## Installation
 
-### Method 1: HACS via custom repository (Recommended)
+### Method 1: HACS (Recommended)
 
-> **Note:** this integration is not in the HACS default store yet
-> (submission is planned) — for now, add the repository manually:
+1. Open **HACS** in your Home Assistant sidebar.
+2. Search for `Smart Fuel Price`.
+3. Click **Download**.
+4. Restart Home Assistant Core.
+
+### Method 2: HACS via custom repository
+
+If the integration doesn't show up in the HACS search yet, add it as a
+custom repository instead:
 
 1. Open **HACS** in your Home Assistant sidebar.
 2. Go to **Integrations**.
@@ -47,10 +54,7 @@ A Home Assistant custom integration that tracks fuel prices for Canadian cities 
 5. Search for `Smart Fuel Price` and click **Download**.
 6. Restart Home Assistant Core.
 
-Once the integration is listed in the HACS default store, steps 3–4
-won't be needed — you'll be able to search for it directly.
-
-### Method 2: Manual Installation
+### Method 3: Manual Installation
 
 1. Download the `smart_fuel_price.zip` archive from the latest [Release Page](https://github.com/meokey/smart-fuel-price/releases).
 2. Extract the `smart_fuel_price` folder into your Home Assistant directory:
