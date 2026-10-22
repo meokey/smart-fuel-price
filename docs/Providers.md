@@ -58,11 +58,13 @@ The city list is cached for a week, so sitemap + verification requests run
 rarely; only not-yet-verified cities are probed (usually just Burnaby --
 a single request), sharing one connection with a politeness gap between
 probes. Every provider declares its `robots.txt`; the global rule is
-`max(Crawl-delay, 1 second)` between requests, applied to probes,
-retries and fetches alike. Price fetches are cached (15 minutes by
-default, adjustable per entry), a manual refresh fetches once per
+`max(Crawl-delay, 1 second)` between requests, applied where requests
+are self-paced: the gap between city-discovery probes, and as a floor
+on the automatic-retry backoff. Regular price fetches are instead
+bounded by the cache (15 minutes by default, adjustable per entry),
+a manual refresh fetches once per
 provider and then greys out for 60 seconds, and automatic retries are
-capped at 5 per provider per day.
+capped at 5 per provider instance (provider + city) per day.
 
 ## Units
 
@@ -94,7 +96,7 @@ Premium, Diesel) — one sensor per (station, grade).
     (up to 2 attempts), honoring the server's `Retry-After` header.
   - *Application layer:* a persistently failed fetch is retried
     automatically per provider with backoff 15 → 30 → 60 → 60 minutes,
-    capped at 5 retries per provider per day (counter survives restarts).
+    capped at 5 retries per provider instance (provider + city) per day (counter survives restarts).
     The manual-refresh button cools down for 60 s after each press.
 
 ## NRC Weekly reference
