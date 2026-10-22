@@ -1,7 +1,7 @@
 # Architecture
 
 How the integration is put together and how data flows through it.
-Diagrams are Mermaid (rendered natively by GitHub) and track the code as of **v2.7.6**.
+Diagrams are Mermaid (rendered natively by GitHub) and track the code as of **v2.7.7**.
 
 - [0. Overview](#0-overview) — modules, who reuses what
 - [1. Fetch pipeline](#1-fetch-pipeline) — the shared core every sensor uses
