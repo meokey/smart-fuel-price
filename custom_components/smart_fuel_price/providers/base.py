@@ -296,10 +296,12 @@ class BaseFuelPriceProvider(ABC):
     def min_request_interval(cls) -> float:
         """Global politeness rule: minimum seconds between requests.
 
-        max(robots.txt Crawl-delay, 1s default). Every request path --
-        city probes, automatic retries, manual refreshes -- consults this,
-        so anti-abuse behavior lives in one place instead of scattered
-        constants.
+        max(robots.txt Crawl-delay, 1s default). Consulted where requests
+        are self-paced: as the gap between city-discovery probes, and as
+        a floor on the automatic-retry backoff. Regular price fetches do
+        not consult it -- they are bounded by the cache TTL / scan
+        interval instead -- and neither does config-flow station
+        validation.
         """
         rp = cls._get_robots()
         if rp is not None:

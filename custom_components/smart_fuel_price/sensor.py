@@ -187,8 +187,6 @@ async def _update_retry_schedule(sensor) -> None:
     delay = await hass.async_add_executor_job(provider.next_retry_delay)
     if delay is None or provider._retry_handle is not None:
         return
-    if delay is None or provider._retry_handle is not None:
-        return
     _LOGGER.info(
         "[%s] Fetch failed for '%s' (%s); scheduling automatic retry in %s",
         provider.name, provider.city, provider.last_fetch_status, delay,
