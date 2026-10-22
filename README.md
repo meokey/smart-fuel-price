@@ -7,8 +7,12 @@
 ![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)
 ![Issues](https://img.shields.io/github/issues/meokey/smart-fuel-price)
 ![License](https://img.shields.io/github/license/meokey/smart-fuel-price)
+![Tests](https://github.com/meokey/smart-fuel-price/actions/workflows/test.yml/badge.svg)
+![Stars](https://img.shields.io/github/stars/meokey/smart-fuel-price)
 
-A Home Assistant custom integration that tracks fuel prices for Canadian cities — daily price forecasts (Gas Wizard, CityNews) and live per-station prices (GasBuddy, anywhere it has data).
+A Home Assistant custom integration that tracks fuel prices for Canadian cities — daily price forecasts (Gas Wizard, CityNews), live per-station prices (GasBuddy, anywhere it has data), and official weekly averages (Natural Resources Canada).
+
+⭐ If Smart Fuel Price helps you time your fill-ups, a star helps other Canadian drivers find it.
 
 ---
 
