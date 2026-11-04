@@ -5,6 +5,7 @@
 - [[Configuration]]
 - [[Providers]]
 - [[Developing a new provider]]
+- [[Release process]]
 - [[Architecture]]
 - [[Dashboard cards]]
 - [[Troubleshooting]]
