@@ -35,6 +35,14 @@ Three sensors: **Price Change** (tomorrow minus today, ¢/L), **Today's Price**,
 **Tomorrow's Forecast**. The forecast's `effective_date_str` attribute names
 the exact date it applies to.
 
+Plus one diagnostic sensor: **Forecast Accuracy (30d)** — the share of the
+last 30 days whose forecast (published the evening before) landed within
+±1 ¢/L of the price that actually ruled the next day, computed from the
+device's own long-term statistics. Its attributes show the pair count the
+rate is based on, the hit count and the mean absolute error, so a rate
+based on only a few days is visible as such. It needs about a day of
+history per pair, so a fresh install reads unknown until pairs accumulate.
+
 ### CityNews device
 
 **Price Change** plus Last updated / Update status. Same forecast semantics

@@ -4,9 +4,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass, SensorDeviceClass
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 from homeassistant.const import CONF_NAME
 
 from .const import (
@@ -37,6 +40,7 @@ from .comparison import (
     maybe_notify_comparison_ready,
     record_nrc_history_ready,
 )
+from .accuracy import compute_accuracy, daily_series_from_rows
 
 _LOGGER = logging.getLogger(__name__)
 # Underlying HA poll trigger -- the provider's TTL cache (editable in the
@@ -414,6 +418,19 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     by_device[config_entry.entry_id]["update_status"] = update_status
     by_device[config_entry.entry_id]["model"] = device_model
     by_device[config_entry.entry_id]["configuration_url"] = device_source_url
+    if provider_type == "affordableenergy_ca":
+        # Forecast accuracy diagnostic (#56). Deliberately NOT passed to
+        # _register(): the manual-refresh button dereferences _provider
+        # on every registered sensor, and this entity has none -- it
+        # reads recorder statistics, not the provider.
+        sensors.append(
+            SmartFuelAccuracySensor(
+                name, config_entry.entry_id, provider.name,
+                suggested_area=city.capitalize(),
+                model=device_model,
+                configuration_url=device_source_url,
+            )
+        )
     _wire_retry_providers(sensors, retry_counters)
     async_add_entities(sensors, True)
     hass.data[DOMAIN].setdefault("sensors", {})[config_entry.entry_id] = by_device
@@ -653,3 +670,125 @@ class SmartFuelSensor(SensorEntity):
             self._provider, (NrcanGcCaProvider, GasBuddyStationProvider)
         ):
             await maybe_notify_comparison_ready(self.hass, self._provider.city)
+
+
+# ---------------------------------------------------------------------------
+# Forecast accuracy (#56)
+# ---------------------------------------------------------------------------
+
+# How often the accuracy sensor re-reads the recorder statistics. The
+# underlying series change once a day; 6h keeps the figure fresh after
+# the evening forecast publish without hammering the recorder on every
+# 15-minute platform poll.
+_ACCURACY_REFRESH = timedelta(hours=6)
+_ACCURACY_WINDOW_DAYS = 30
+
+
+class SmartFuelAccuracySensor(SensorEntity):
+    """Diagnostic sensor: Gas Wizard forecast accuracy, last 30 days.
+
+    Reads the long-term statistics of this entry's own "Tomorrow's
+    Forecast" and "Today's Price" entities back from the recorder and
+    pairs them with accuracy.compute_accuracy(). Read-only: it writes
+    no statistics of its own beyond its own measurement state, and any
+    recorder problem leaves it unknown instead of breaking the entry.
+    Only created for Gas Wizard entries -- the only provider with both
+    a forecast and a same-source actual series (see issue #56).
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Forecast Accuracy (30d)"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_native_unit_of_measurement = "%"
+    _attr_icon = "mdi:target"
+
+    def __init__(self, device_name, device_key, provider_name,
+                 suggested_area=None, model=None, configuration_url=None):
+        self._device_key = device_key
+        self._attr_unique_id = f"smart_fuel_price_{device_key}_accuracy"
+        self._attr_attribution = f"Data provided by {provider_name}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_key)},
+            name=device_name,
+            manufacturer=provider_name,
+            model=model,
+            suggested_area=suggested_area,
+            configuration_url=configuration_url,
+        )
+        self._state = None
+        self._attributes: dict = {}
+        self._last_query: datetime | None = None
+
+    @property
+    def native_value(self):
+        return self._state
+
+    @property
+    def extra_state_attributes(self):
+        return self._attributes
+
+    def _sibling_entity_id(self, ent_reg, suffix: str):
+        return ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, f"smart_fuel_price_{self._device_key}_{suffix}"
+        )
+
+    async def async_update(self):
+        now = dt_util.now()
+        if (
+            self._last_query is not None
+            and now - self._last_query < _ACCURACY_REFRESH
+        ):
+            return
+        self._last_query = now
+        try:
+            # Lazy import, fail-soft like the NRC backfill: a missing or
+            # changed recorder API must never break this entry's setup.
+            from homeassistant.components.recorder.statistics import (
+                statistics_during_period,
+            )
+        except Exception as err:  # noqa: BLE001 -- recorder is best-effort
+            _LOGGER.debug("Accuracy sensor: recorder API unavailable: %s", err)
+            return
+        ent_reg = er.async_get(self.hass)
+        forecast_id = self._sibling_entity_id(ent_reg, "tomorrow")
+        actual_id = self._sibling_entity_id(ent_reg, "today")
+        if not forecast_id or not actual_id:
+            _LOGGER.debug(
+                "Accuracy sensor: sibling entities not registered yet "
+                "(forecast=%s, actual=%s)", forecast_id, actual_id,
+            )
+            return
+        start = now - timedelta(days=_ACCURACY_WINDOW_DAYS + 2)
+        try:
+            stats = await self.hass.async_add_executor_job(
+                statistics_during_period,
+                self.hass,
+                start,
+                now,
+                {forecast_id, actual_id},
+                "day",
+                None,
+                {"state", "mean"},
+            )
+        except Exception as err:  # noqa: BLE001 -- never break the poll
+            _LOGGER.warning("Accuracy sensor: statistics query failed: %s", err)
+            return
+        result = compute_accuracy(
+            daily_series_from_rows(
+                stats.get(forecast_id), dt_util.get_default_time_zone()
+            ),
+            daily_series_from_rows(
+                stats.get(actual_id), dt_util.get_default_time_zone()
+            ),
+            today=now.date(),
+            window_days=_ACCURACY_WINDOW_DAYS,
+        )
+        self._state = result.hit_rate
+        self._attributes = {
+            "pairs": result.pair_count,
+            "hits": result.hits,
+            "mean_abs_error_c_per_l": result.mean_abs_error,
+            "tolerance_c_per_l": result.tolerance,
+            "window_days": _ACCURACY_WINDOW_DAYS,
+        }

@@ -93,6 +93,30 @@ storage_mod.Store = FakeStore
 helpers.storage = storage_mod
 ha.helpers = helpers
 
+# Stubs for the #56 accuracy sensor's imports (module presence only --
+# these tests never drive its recorder query).
+entreg_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+entreg_mod.async_get = lambda hass: None
+helpers.entity_registry = entreg_mod
+
+entity_mod = types.ModuleType("homeassistant.helpers.entity")
+
+
+class EntityCategory:
+    DIAGNOSTIC = "diagnostic"
+
+
+entity_mod.EntityCategory = EntityCategory
+helpers.entity = entity_mod
+
+util_mod = types.ModuleType("homeassistant.util")
+util_mod.__path__ = []
+dt_mod = types.ModuleType("homeassistant.util.dt")
+dt_mod.now = lambda: datetime.now(timezone.utc)
+dt_mod.get_default_time_zone = lambda: timezone.utc
+util_mod.dt = dt_mod
+ha.util = util_mod
+
 const_mod = types.ModuleType("homeassistant.const")
 const_mod.CONF_NAME = "name"
 ha.const = const_mod
@@ -104,8 +128,12 @@ sys.modules.update(
         "homeassistant.components.sensor": sensor_mod_stub,
         "homeassistant.helpers": helpers,
         "homeassistant.helpers.device_registry": devreg,
+        "homeassistant.helpers.entity_registry": entreg_mod,
+        "homeassistant.helpers.entity": entity_mod,
         "homeassistant.helpers.event": event_mod,
         "homeassistant.helpers.storage": storage_mod,
+        "homeassistant.util": util_mod,
+        "homeassistant.util.dt": dt_mod,
         "homeassistant.const": const_mod,
     }
 )
