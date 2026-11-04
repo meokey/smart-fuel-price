@@ -33,6 +33,7 @@ A Home Assistant custom integration that tracks fuel prices for Canadian cities 
 - **Multi-Station, Multi-Grade GasBuddy Tracking**: Track several stations at once, each with one or more fuel grades (Regular, Midgrade, Premium, Diesel) — one HA device per station, one sensor per grade.
 - **Automatic Area Assignment**: New devices are created with a suggested Area matching their city, so Home Assistant sets this up for you on first install.
 - **Dynamic Attribute Filtering (Options Flow)**: Enable or disable specific state attributes via UI settings without modifying code.
+- **Forecast Accuracy Scoring (Gas Wizard)**: A diagnostic sensor grades the last 30 days of forecasts against the prices that actually ruled (±1 ¢/L counts as a hit), computed from the device's own long-term statistics — with pair count and mean-error attributes, so you can judge how much to trust tomorrow's number.
 - **YAML Migration Support**: Automatically migrates legacy `configuration.yaml` definitions into UI Config Entries seamlessly.
 
 ---
@@ -66,6 +67,25 @@ custom repository instead:
    custom_components/smart_fuel_price/
 ```
 3. Restart Home Assistant Core.
+
+### Beta versions (pre-releases)
+
+New versions are published as GitHub **pre-releases** first and promoted to a
+full release only after testing. Beta versions are hidden in HACS by default.
+To try one:
+
+1. Open **HACS** and open **Smart Fuel Price**.
+2. Click the **⋮** menu (top right) → **Redownload**.
+3. In the dialog, turn on **Show beta versions**.
+4. Pick the beta version (its name ends in `-beta.N`) and click **Download**.
+5. Restart Home Assistant.
+
+Before promotion, every pre-release is installed on a test Home Assistant
+instance, configured, checked for errors, and its new or changed features are
+verified against their intended behaviour. To go back to the stable version,
+**Redownload** again and pick the latest version without `-beta` in its name.
+Please report beta problems in
+[Issues](https://github.com/meokey/smart-fuel-price/issues).
 
 ---
 

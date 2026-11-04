@@ -43,5 +43,8 @@ jobs:
         with:
           files: smart_fuel_price.zip
           generate_release_notes: true
+          # Tags with a suffix (e.g. v2.7.10-beta.1) publish as pre-releases;
+          # plain vX.Y.Z tags publish as full releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
