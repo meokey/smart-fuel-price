@@ -16,6 +16,7 @@ Why it's useful:
 
 - **Buy-now sensor** — a binary sensor that answers the real question directly: fill up today, or wait for tomorrow
 - **Honest status** — *Update status* and *Last updated* sensors always tell the truth about data freshness
+- **Forecast accuracy, scored** — a Gas Wizard diagnostic sensor grades the last 30 days of forecasts against the prices that actually ruled (±1 ¢/L counts as a hit), so you can see how much to trust tomorrow's number
 - **Polite by design** — cached polling, one fetch per provider on manual refresh, read-only sources that never get hammered
 
 New here? Start with
