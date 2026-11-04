@@ -210,6 +210,17 @@ def test_citynews_calgary_without_widget_fails_soft():
     assert data["is_valid"] is False
 
 
+def test_citynews_unknown_city_does_not_fall_back_to_toronto():
+    # Regression (#95): an unknown city must never show Toronto's data
+    # under its own name -- and must not even fetch the Toronto page.
+    session = FakeSession({"https://toronto.citynews.ca/gas-prices/": CITYNEWS_TORONTO_HTML})
+    data = CityNewsCaProvider("vancouver", session=session).fetch_data()
+
+    assert data["is_valid"] is False
+    assert data["city"] == "vancouver"
+    assert session.requested == []
+
+
 GASWIZARD_NO_CHANGE_HTML = _gaswizard_html(
     (_TODAY + timedelta(days=1), "181.9", " ---"),
     (_TODAY, "181.9",
@@ -374,6 +385,54 @@ def test_gasbuddy_amount_reported_as_cents_per_litre():
     assert data["state"] == pytest.approx(168.9)
     assert data["current_price"] == pytest.approx(168.9)
     assert provider.native_unit_of_measurement == "\u00a2/L"
+
+
+def test_gasbuddy_zero_price_is_valid():
+    """Regression (#96): 0.0 is a present price, not 'no price' -- the
+    or-chain must distinguish None (missing) from 0 (present), and keep
+    the credit entry's postedTime that belongs to that 0 price."""
+    import copy
+    station = copy.deepcopy(GASBUDDY_GRAPHQL_STATION)
+    station["prices"][0]["credit"] = {
+        "price": 0.0, "formattedPrice": "0.0",
+        "postedTime": "2026-10-07T19:00:00Z", "nickname": "member",
+    }
+    station["prices"][0]["cash"] = {
+        "price": 150.0, "formattedPrice": "150.0",
+        "postedTime": "2026-10-07T18:00:00Z", "nickname": "member",
+    }
+    session = FakeGasBuddySession(station)
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+
+    assert data["is_valid"] is True
+    assert data["current_price"] == pytest.approx(0.0)
+    assert "2026-10-07T19:00:00Z" in data["last_reported_str"]
+
+
+def test_gasbuddy_zero_cash_price_used_when_credit_missing():
+    import copy
+    station = copy.deepcopy(GASBUDDY_GRAPHQL_STATION)
+    station["prices"][0]["credit"] = {"price": None, "postedTime": None}
+    station["prices"][0]["cash"] = {
+        "price": 0.0, "formattedPrice": "0.0",
+        "postedTime": "2026-10-07T18:00:00Z", "nickname": "member",
+    }
+    session = FakeGasBuddySession(station)
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+
+    assert data["is_valid"] is True
+    assert data["current_price"] == pytest.approx(0.0)
+
+
+def test_gasbuddy_both_prices_missing_is_invalid():
+    import copy
+    station = copy.deepcopy(GASBUDDY_GRAPHQL_STATION)
+    station["prices"][0]["credit"] = {"price": None, "postedTime": None}
+    station["prices"][0]["cash"] = {"price": None, "postedTime": None}
+    session = FakeGasBuddySession(station)
+    data = GasBuddyStationProvider("205748", session=session).fetch_data()
+
+    assert data["is_valid"] is False
 
 
 def test_gasbuddy_missing_station_fails_soft():

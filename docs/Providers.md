@@ -47,6 +47,12 @@ automatically excluded from the dropdown. Halifax's page uses a non-standard
 slug (`halifax-nova-scotia-gas-diesel-prices/`) and reports current prices
 plus diesel -- no forecast.
 
+CityNews supports exactly the 5 cities listed above. City discovery may
+surface other citynews.ca markets that are not supported yet; a CityNews
+entry configured for such a city shows as unavailable rather than ever
+displaying another city's prices under its name. Open an issue to request
+adding a city.
+
 The Gas Wizard city list is built live from gaswizard.ca's sitemap.
 **Burnaby** is the only sitemap page without forecast data, so it is excluded
 automatically -- if its page ever gains data, or gaswizard.ca adds new
@@ -70,7 +76,8 @@ capped at 5 per provider instance (provider + city) per day.
 
 Everything is in **cents per litre (¢/L)** — the number on Canadian pumps.
 GasBuddy's API already reports ¢/L, so the value is passed through raw;
-the `¢/L` unit label carries the meaning.
+the `¢/L` unit label carries the meaning. A reported GasBuddy price of
+0 ¢/L is treated as a real price, not as a missing one.
 
 ## Finding a GasBuddy station ID
 
