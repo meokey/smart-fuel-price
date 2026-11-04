@@ -172,12 +172,12 @@ class CityNewsCaProvider(BaseFuelPriceProvider):
     def _parse_data(self) -> dict[str, Any]:
         city_info = CITY_MAP.get(self.city)
         if not city_info:
-            _LOGGER.warning(
-                "[%s] City '%s' is not in the known map; falling back to 'toronto'.",
+            _LOGGER.error(
+                "[%s] City '%s' is not in CITY_MAP; refusing to substitute another city.",
                 self.name,
                 self.city,
             )
-            city_info = CITY_MAP["toronto"]
+            return {"city": self.city, "is_valid": False}
 
         subdomain = city_info["subdomain"]
         parser_hint = city_info.get("parser", "auto")

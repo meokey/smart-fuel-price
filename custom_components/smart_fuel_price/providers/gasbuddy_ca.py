@@ -386,9 +386,14 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
 
         credit = matched.get("credit") or {}
         cash = matched.get("cash") or {}
-        price = credit.get("price") or cash.get("price")
-        if not price:
+        # Distinguish None (missing) from 0 (a present, legal price):
+        # an or-chain would discard a 0 ¢/L price as "no price" (#96).
+        credit_price = credit.get("price")
+        price = credit_price if credit_price is not None else cash.get("price")
+        if price is None:
             return {"is_valid": False}
+        credit_posted = credit.get("postedTime")
+        posted_time = credit_posted if credit_posted is not None else cash.get("postedTime")
 
         # Price is already in cents per litre (e.g. 165.9); pass it
         # through raw -- the "¢/L" unit label carries the meaning.
@@ -399,7 +404,7 @@ class GasBuddyStationProvider(BaseFuelPriceProvider):
             "current_price": price,
             "trend": "unknown",  # no prior-price comparison available here
             "effective_date_str": "N/A",  # not applicable -- see last_reported_str
-            "last_reported_str": (credit.get("postedTime") or cash.get("postedTime")) or "N/A",
+            "last_reported_str": posted_time or "N/A",
             "is_valid": True,
             "is_rising": False,
             "is_dropping": False,
