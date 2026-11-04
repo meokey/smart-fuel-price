@@ -66,6 +66,34 @@ class AccuracyResult:
         return round(sum(p.error for p in self.pairs) / len(self.pairs), 2)
 
 
+def daily_series_from_rows(rows, tz) -> dict[date, float]:
+    """Build a {local date: value} series from day-period statistics rows.
+
+    ``rows`` are ``statistics_during_period(..., "day", ...)`` rows for
+    one statistic id; ``tz`` is the local timezone the recorder bucketed
+    the days in (Home Assistant's default timezone). Prefers the row's
+    ``state`` -- the last recorded value of the day, which for the
+    forecast sensor is the evening-published prediction for tomorrow --
+    and falls back to ``mean``. Rows without a usable value are skipped.
+    """
+    from datetime import datetime, timezone
+
+    series: dict[date, float] = {}
+    for row in rows or []:
+        value = row.get("state")
+        if value is None:
+            value = row.get("mean")
+        start = row.get("start")
+        if value is None or start is None:
+            continue
+        if isinstance(start, datetime):
+            moment = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
+        else:
+            moment = datetime.fromtimestamp(start, tz=timezone.utc)
+        series[moment.astimezone(tz).date()] = float(value)
+    return series
+
+
 def compute_accuracy(
     forecast_by_day: dict[date, float],
     actual_by_day: dict[date, float],

@@ -83,3 +83,22 @@ def test_future_actuals_ignored():
     actual = {TODAY + timedelta(days=1): 170.0}
     result = compute_accuracy(forecast, actual, today=TODAY)
     assert result.pair_count == 0
+
+
+def test_daily_series_from_rows_prefers_state_and_buckets_by_local_day():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    toronto = ZoneInfo("America/Toronto")
+    # 2026-11-02T04:30Z is 2026-11-01 23:30 EST -- the row belongs to
+    # the local Nov 1 bucket, not the UTC Nov 2 bucket.
+    ts = datetime(2026, 11, 2, 4, 30, tzinfo=timezone.utc).timestamp()
+    rows = [
+        {"start": ts, "state": 181.9, "mean": 180.0},
+        # No state -> mean fallback.
+        {"start": ts + 86400, "state": None, "mean": 175.5},
+        # Nothing usable -> skipped.
+        {"start": ts + 2 * 86400, "state": None, "mean": None},
+    ]
+    series = _mod.daily_series_from_rows(rows, toronto)
+    assert series == {date(2026, 11, 1): 181.9, date(2026, 11, 2): 175.5}
